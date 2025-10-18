@@ -26,16 +26,17 @@ function saveUsedTopic(topic) {
 }
 
 bot.start(async ctx => {
-    const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('🧠 Сгенерувати блог', 'generate_blog')],
-        [Markup.button.callback('🧩 Сгенерувати опитування', 'generate_quiz')],
-        [Markup.button.callback('🎭 Сгенерувати цитату', 'generate_quote')]
-    ]);
+    const keyboard = Markup.keyboard([
+        ['🧠 Сгенерувати блог'],
+        ['🧩 Сгенерувати опитування'],
+        ['🎭 Сгенерувати цитату']
+    ]).resize();
+
     await ctx.reply('Привіт! 👋 Обери, що хочеш згенерувати:', keyboard);
 });
 
-bot.action('generate_blog', async ctx => {
-    await ctx.answerCbQuery();
+// === Генерація блогу ===
+bot.hears('🧠 Сгенерувати блог', async ctx => {
     await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
 
     let blogIdea = '';
@@ -51,8 +52,10 @@ bot.action('generate_blog', async ctx => {
         - обов’язково почни з емодзі
         - не додавай лапки, не пиши слово “Ідея”
         `;
+
         const ideaResult = await model.generateContent(ideaPrompt);
         const idea = ideaResult.response.text().trim();
+
         if (!usedTopics.includes(idea)) {
             blogIdea = idea;
             saveUsedTopic(idea);
@@ -100,8 +103,8 @@ bot.action('generate_blog', async ctx => {
     }
 });
 
-bot.action('generate_quiz', async ctx => {
-    await ctx.answerCbQuery();
+// === Генерація вікторини ===
+bot.hears('🧩 Сгенерувати опитування', async ctx => {
     await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
 
     let question = '';
@@ -124,29 +127,35 @@ bot.action('generate_quiz', async ctx => {
     EXPLANATION: коротке пояснення (до 200 символів).
     Без Markdown чи HTML.
     `;
+
         const quizResult = await model.generateContent(quizPrompt);
         const text = quizResult.response.text();
         const questionMatch = text.match(/QUESTION:\s*(.+)/i);
         const optionsMatch = text.match(/OPTIONS:[\s\S]*?(?=CORRECT:)/i);
         const correctMatch = text.match(/CORRECT:\s*(\d)/i);
         const explanationMatch = text.match(/EXPLANATION:\s*(.+)/i);
+
         if (!questionMatch || !optionsMatch || !correctMatch) {
             attempts++;
             continue;
         }
+
         const q = questionMatch[1].trim();
         if (usedTopics.includes(q)) {
             attempts++;
             continue;
         }
+
         question = q;
         saveUsedTopic(question);
+
         options = optionsMatch[0]
             .replace('OPTIONS:', '')
             .trim()
             .split(/\d\)\s*/)
             .filter(Boolean)
             .map(o => o.trim().slice(0, 70));
+
         correct = Number(correctMatch[1]) - 1;
         explanation = explanationMatch ? explanationMatch[1].trim().slice(0, 200) : '';
         break;
@@ -188,8 +197,8 @@ bot.action('generate_quiz', async ctx => {
     }
 });
 
-bot.action('generate_quote', async ctx => {
-    await ctx.answerCbQuery();
+// === Генерація цитати ===
+bot.hears('🎭 Сгенерувати цитату', async ctx => {
     await ctx.reply('😎 Генерую настрій розробника...');
 
     const quotePrompt = `
@@ -205,13 +214,16 @@ bot.action('generate_quote', async ctx => {
     🧠 Якщо працює — не чіпай. Якщо не працює — теж не чіпай, поки не вип’єш кави.
     🔥 Я не помиляюсь — я просто створюю нові фічі випадково.
     `;
+
     try {
         const quoteResult = await model.generateContent(quotePrompt);
         let quote = quoteResult.response.text().trim();
+
         quote = quote
             .replace(/[*_`<>]/g, '')
             .replace(/\n{2,}/g, '\n')
             .trim();
+
         await ctx.reply(`💬 <b>Цитата розробника:</b>\n\n${quote}`, { parse_mode: 'HTML' });
     } catch (err) {
         console.error(err);
@@ -220,4 +232,4 @@ bot.action('generate_quote', async ctx => {
 });
 
 bot.launch();
-console.log('✅ Бот запущений (уникальные темы активированы)!');
+console.log('✅ Бот запущений (з кнопками під полем вводу)!');
