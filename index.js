@@ -90,76 +90,78 @@ bot.start(async ctx => {
 
 bot.hears('🧠 Сгенерувати блог', ctx => {
     protectedGeneration(ctx, 'blog', async (ctx) => {
-        const loadingMessage = await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
+        const loadingMessage = await ctx.reply('🌀 Генерую ідею та повний блог-пост...');
 
-        let blogIdea = '';
+        let fullResult = '';
         let attempts = 0;
 
         try {
             while (attempts < 10) {
-                const ideaPrompt = `
-                Придумай одну коротку, креативну ідею українською для телеграм-блогу про:
-                - роботу розробника, життя у сфері IT, мотивацію, технології, AI або Node.js.
-                Формат:
-                - лише 1 ідея (жодних списків)
-                - до 70 символів
-                - обов'язково почни з емодзі
-                - не додавай лапки
-                `;
-                const ideaResult = await model.generateContent(ideaPrompt);
-                const idea = ideaResult.response.text().trim();
+                const combinedPrompt = `
+                Створи одразу ідею і повний блог-пост українською (1500–2200 символів)
+                у стилі сучасного IT-блогу про: роботу розробника, життя у сфері IT, мотивацію, технології, AI або Node.js.
 
-                if (!isDuplicateIdea(idea)) {
-                    blogIdea = idea;
-                    saveUsedTopic(idea);
-                    break;
+                Формат відповіді:
+                Ідея: ... (коротка ідея, 1 рядок, почни з емодзі)
+                Пост: ... (весь блог-пост)
+                `;
+
+                const result = await model.generateContent(combinedPrompt);
+                fullResult = result.response.text();
+
+                const ideaMatch = fullResult.match(/Ідея:\s*(.+?)\n/i);
+                if (ideaMatch) {
+                    const idea = ideaMatch[1].trim();
+                    if (!isDuplicateIdea(idea)) {
+                        saveUsedTopic(idea);
+                        break;
+                    }
                 }
                 attempts++;
             }
         } catch (error) {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Помилка [1/2] при генерації ідеї. Спробуй ще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `⚠️ Помилка генерації [1/1]. Спробуй ще раз. Деталі: ${error.message}`);
             return;
         }
 
-        if (!blogIdea) {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
+        if (!fullResult) {
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Не вдалося згенерувати новий пост, усі ідеї вже були 😅');
             return;
         }
 
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `✨ <b>Ідея для блогу:</b>\n\n${blogIdea}\n\n✍️ Генерую повний блог-пост...`, { parse_mode: 'HTML' });
+        const ideaMatch = fullResult.match(/Ідея:\s*(.+?)\n/i);
+        const postMatch = fullResult.match(/Пост:\s*([\s\S]+)/i);
 
-        const postPrompt = `
-        Створи великий телеграм-пост українською (1500–2200 символів)
-        у стилі сучасного IT-блогу.
-        Тема: "${blogIdea}"
-        `;
+        if (ideaMatch && postMatch) {
+            const blogIdea = ideaMatch[1].trim();
+            const rawPost = postMatch[1].trim();
+            const styledPost = cleanPostText(rawPost);
 
-        try {
-            const postResult = await model.generateContent(postPrompt);
-            const styledPost = cleanPostText(postResult.response.text());
-            await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `✨ <b>Ідея для блогу:</b>\n\n${blogIdea}`, { parse_mode: 'HTML' });
             await ctx.reply(styledPost);
-        } catch (error) {
-            await ctx.reply(`⚠️ Помилка [2/2] при генерації самого блог-поста: ${error.message}. Спробуй ще раз.`);
+        } else {
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Помилка форматування відповіді від AI. Спробуй ще раз.');
         }
     });
 });
 
 bot.hears('🧩 Сгенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz', async (ctx) => {
-        const loadingMessage = await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
+        const loadingMessage = await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину та пояснення...');
 
         let question = '';
         let options = [];
         let correct = 0;
         let explanation = '';
+        let postText = '';
         let attempts = 0;
 
         try {
             while (attempts < 10) {
-                const quizPrompt = `
-                Створи одне складне запитання з фронтенду (HTML, CSS, JavaScript або Vue.js).
-                Формат:
+                const combinedQuizPrompt = `
+                Створи одне складне запитання з фронтенду (HTML, CSS, JavaScript або Vue.js), а також повний пояснювальний пост для Telegram (700-1200 символів).
+
+                Формат відповіді:
                 QUESTION: ...
                 OPTIONS:
                 1) ...
@@ -168,17 +170,19 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
                 4) ...
                 CORRECT: X
                 EXPLANATION: ...
+                POST: ...
                 `;
 
-                const quizResult = await model.generateContent(quizPrompt);
+                const quizResult = await model.generateContent(combinedQuizPrompt);
                 const text = quizResult.response.text();
 
                 const questionMatch = text.match(/^QUESTION:\s*(.+?)\n/ms);
                 const optionsMatch = text.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms);
                 const correctMatch = text.match(/CORRECT:\s*(\d)/i);
                 const explanationMatch = text.match(/EXPLANATION:\s*(.+)/is);
+                const postMatch = text.match(/POST:\s*([\s\S]+)/i);
 
-                if (!questionMatch || !optionsMatch || !correctMatch) {
+                if (!questionMatch || !optionsMatch || !correctMatch || !postMatch) {
                     attempts++;
                     continue;
                 }
@@ -199,19 +203,21 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
 
                 correct = Number(correctMatch[1]) - 1;
                 explanation = explanationMatch ? explanationMatch[1].trim().slice(0, 200) : '';
+                postText = cleanPostText(postMatch[1].trim());
                 break;
             }
         } catch (error) {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Помилка [1/3] при генерації запитання для опитування. Спробуй ще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `⚠️ Помилка генерації [1/1]. Спробуй ще раз. Деталі: ${error.message}`);
             return;
         }
+
 
         if (!question) {
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Не вдалося знайти нове запитання 😅');
             return;
         }
 
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `✅ Питання готове. ⏳ Надсилаю опитування та генерую пояснення...`);
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `✅ Питання готове. Надсилаю опитування та пояснення...`);
 
         try {
             await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
@@ -221,22 +227,15 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
                 is_anonymous: true
             });
         } catch (error) {
-            await ctx.reply('⚠️ Помилка [2/3] при надсиланні опитування Telegram. Спробуй ще раз.');
+            await ctx.reply('⚠️ Помилка при надсиланні опитування Telegram. Спробуй ще раз.');
             return;
         }
 
-        const postPrompt = `
-        Створи український телеграм-пост (700–1200 символів)
-        для теми "${question}" у стилі короткого навчального поста.
-        `;
-
         try {
-            const postResult = await model.generateContent(postPrompt);
-            const styledPost = cleanPostText(postResult.response.text());
             await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
-            await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
+            await ctx.telegram.sendMessage(ctx.chat.id, postText);
         } catch (error) {
-            await ctx.reply(`⚠️ Помилка [3/3] при генерації пояснювального поста для опитування: ${error.message}. Спробуй ще раз.`);
+            await ctx.reply(`⚠️ Помилка при надсиланні пояснювального поста: ${error.message}. Спробуй ще раз.`);
         }
     });
 });
