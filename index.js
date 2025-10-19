@@ -20,6 +20,14 @@ if (fs.existsSync(USED_TOPICS_FILE)) {
     }
 }
 
+function getText(result) {
+    return (
+        result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+        result?.response?.text?.trim() ||
+        ''
+    );
+}
+
 function similarityRatio(a, b) {
     a = a.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
     b = b.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
@@ -47,30 +55,25 @@ const activeGenerations = new Map();
 
 function protectedGeneration(ctx, type, generator) {
     const chatId = ctx.chat.id;
-    const messageId = ctx.message.message_id;
+    const messageId = ctx.message?.message_id;
 
     if (activeGenerations.has(chatId)) {
-        if (activeGenerations.get(chatId).messageId === messageId) {
-            return;
-        }
         ctx.reply('⏳ **УВАГА!** Попередня генерація ще не завершена. Зачекай ✋', { parse_mode: 'Markdown' });
         return;
     }
 
     activeGenerations.set(chatId, { type, messageId, startTime: Date.now() });
 
-    setTimeout(async () => {
+    (async () => {
         try {
             await generator(ctx);
         } catch (error) {
-            ctx.reply('⚠️ Критична помишка. Спробуй ще раз.');
+            console.error('❌ Generation error:', error);
+            ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
         } finally {
-            const currentData = activeGenerations.get(chatId);
-            if (currentData && currentData.messageId === messageId) {
-                activeGenerations.delete(chatId);
-            }
+            activeGenerations.delete(chatId);
         }
-    }, 1);
+    })();
 }
 
 function cleanPostText(text) {
@@ -93,31 +96,27 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
         await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
 
         let blogIdea = '';
-        let attempts = 0;
-
-        while (attempts < 10) {
-            const ideaPrompt = `
-            Придумай одну коротку, креативну ідею українською для телеграм-блогу про:
-            - роботу розробника, життя у сфері IT, мотивацію, технології, AI або Node.js.
-            Формат:
-            - лише 1 ідея (жодних списків)
-            - до 70 символів
-            - обов'язково почни з емодзі
-            - не додавай лапки
-            `;
-            const ideaResult = await model.generateContent(ideaPrompt);
-            const idea = ideaResult.response.text().trim();
-
-            if (!isDuplicateIdea(idea)) {
+        for (let i = 0; i < 10; i++) {
+            const prompt = `
+      Придумай одну коротку, креативну ідею українською для телеграм-блогу про:
+      - роботу розробника, життя у сфері IT, мотивацію, технології або Node.js.
+      Формат:
+      - лише 1 ідея (жодних списків)
+      - до 70 символів
+      - обов'язково почни з емодзі
+      - не додавай лапки
+      `;
+            const res = await model.generateContent([prompt]);
+            const idea = getText(res);
+            if (idea && !isDuplicateIdea(idea)) {
                 blogIdea = idea;
                 saveUsedTopic(idea);
                 break;
             }
-            attempts++;
         }
 
         if (!blogIdea) {
-            await ctx.reply('⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
+            await ctx.reply('⚠️ Не вдалося знайти нову тему 😅');
             return;
         }
 
@@ -125,14 +124,13 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
         await ctx.reply('✍️ Генерую повний блог-пост...');
 
         const postPrompt = `
-        Створи великий телеграм-пост українською (1500–2200 символів)
-        у стилі сучасного IT-блогу.
-        Тема: "${blogIdea}"
-        `;
-
-        const postResult = await model.generateContent(postPrompt);
-        const styledPost = cleanPostText(postResult.response.text());
-        await ctx.reply(styledPost);
+    Створи великий телеграм-пост українською (1500–2200 символів)
+    у стилі сучасного IT-блогу.
+    Тема: "${blogIdea}"
+    `;
+        const postRes = await model.generateContent([postPrompt]);
+        const post = cleanPostText(getText(postRes));
+        await ctx.reply(post);
     });
 });
 
@@ -144,51 +142,33 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
         let options = [];
         let correct = 0;
         let explanation = '';
-        let attempts = 0;
 
-        while (attempts < 10) {
-            const quizPrompt = `
-            Створи одне складне запитання з фронтенду (HTML, CSS, JavaScript або Vue.js).
-            Формат:
-            QUESTION: ...
-            OPTIONS:
-            1) ...
-            2) ...
-            3) ...
-            4) ...
-            CORRECT: X
-            EXPLANATION: ...
-            `;
+        for (let i = 0; i < 10; i++) {
+            const prompt = `
+      Створи одне складне запитання з фронтенду (HTML, CSS, JavaScript або Vue.js).
+      Формат:
+      QUESTION: ...
+      OPTIONS:
+      1) ...
+      2) ...
+      3) ...
+      4) ...
+      CORRECT: X
+      EXPLANATION: ...
+      `;
+            const res = await model.generateContent([prompt]);
+            const text = getText(res);
 
-            const quizResult = await model.generateContent(quizPrompt);
-            const text = quizResult.response.text();
-
-            const questionMatch = text.match(/^QUESTION:\s*(.+?)\n/ms);
-            const optionsMatch = text.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms);
-            const correctMatch = text.match(/CORRECT:\s*(\d)/i);
-            const explanationMatch = text.match(/EXPLANATION:\s*(.+)/is);
-
-            if (!questionMatch || !optionsMatch || !correctMatch) {
-                attempts++;
-                continue;
-            }
-
-            const q = questionMatch[1].trim();
-            if (isDuplicateIdea(q)) {
-                attempts++;
-                continue;
-            }
+            const q = text.match(/^QUESTION:\s*(.+?)\n/ms)?.[1]?.trim();
+            if (!q || isDuplicateIdea(q)) continue;
 
             question = q;
             saveUsedTopic(q);
-            options = optionsMatch[1]
-                .trim()
-                .split(/\d\)\s*/)
-                .filter(Boolean)
-                .map(o => o.trim().slice(0, 70));
 
-            correct = Number(correctMatch[1]) - 1;
-            explanation = explanationMatch ? explanationMatch[1].trim().slice(0, 200) : '';
+            const optionsBlock = text.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms)?.[1] || '';
+            options = optionsBlock.split(/\d\)\s*/).filter(Boolean).map(o => o.trim().slice(0, 70));
+            correct = Number(text.match(/CORRECT:\s*(\d)/)?.[1]) - 1 || 0;
+            explanation = text.match(/EXPLANATION:\s*(.+)/is)?.[1]?.trim()?.slice(0, 200) || '';
             break;
         }
 
@@ -205,12 +185,12 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
         });
 
         const postPrompt = `
-        Створи український телеграм-пост (700–1200 символів)
-        для теми "${question}" у стилі короткого навчального поста.
-        `;
-        const postResult = await model.generateContent(postPrompt);
-        const styledPost = cleanPostText(postResult.response.text());
-        await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
+    Створи український телеграм-пост (700–1200 символів)
+    для теми "${question}" у стилі короткого навчального поста.
+    `;
+        const postRes = await model.generateContent([postPrompt]);
+        const post = cleanPostText(getText(postRes));
+        await ctx.telegram.sendMessage(ctx.chat.id, post);
     });
 });
 
@@ -218,26 +198,20 @@ bot.hears('🎭 Сгенерувати цитату', ctx => {
     protectedGeneration(ctx, 'quote', async (ctx) => {
         await ctx.reply('😎 Генерую настрій розробника...');
 
-        const quotePrompt = `
-        Придумай коротку дотепну цитату українською (до 200 символів)
-        про життя або філософію розробника.
-        Без лапок, лише текст у стилі Telegram, з емодзі.
-        `;
-
-        let attempts = 0;
-        while (attempts < 10) {
-            const quoteResult = await model.generateContent(quotePrompt);
-            let quote = quoteResult.response.text().trim();
-            quote = cleanPostText(quote).replace(/\n{2,}/g, '\n');
-
+        const prompt = `
+    Придумай коротку дотепну цитату українською (до 200 символів)
+    про життя або філософію розробника.
+    Без лапок, лише текст у стилі Telegram, з емодзі.
+    `;
+        for (let i = 0; i < 10; i++) {
+            const res = await model.generateContent([prompt]);
+            const quote = cleanPostText(getText(res));
             if (!isDuplicateIdea(quote)) {
                 saveUsedTopic(quote);
                 await ctx.reply(`💬 <b>Цитата розробника:</b>\n\n${quote}`, { parse_mode: 'HTML' });
                 return;
             }
-            attempts++;
         }
-
         await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
     });
 });
@@ -246,42 +220,35 @@ bot.hears('🧮 Зробити задачу', ctx => {
     protectedGeneration(ctx, 'task', async (ctx) => {
         await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
 
-        const taskPrompt = `
-        Створи коротку практичну задачу з JavaScript українською.
-        Формат:
-        🧩 Задача (масиви, логіка, дати): ...
-        📦 Приклад:
-        \`\`\`js
-        const arr = [...]
-        // приклад виклику
-        \`\`\`
-        🔍 Уточнення: ...
-        Має бути унікальна задача без повторів, до 1000 символів.
-        `;
-
-        let attempts = 0;
-        while (attempts < 10) {
-            const result = await model.generateContent(taskPrompt);
-            const task = cleanPostText(result.response.text());
-
+        const prompt = `
+    Створи коротку практичну задачу з JavaScript українською.
+    Формат:
+    🧩 Задача (масиви, логіка, дати): ...
+    📦 Приклад:
+    \`\`\`js
+    const arr = [...]
+    // приклад виклику
+    \`\`\`
+    🔍 Уточнення: ...
+    Має бути унікальна задача без повторів, до 1000 символів.
+    `;
+        for (let i = 0; i < 10; i++) {
+            const res = await model.generateContent([prompt]);
+            const task = cleanPostText(getText(res));
             if (!isDuplicateIdea(task)) {
                 saveUsedTopic(task);
                 await ctx.reply(task);
                 return;
             }
-            attempts++;
         }
-
         await ctx.reply('⚠️ Не вдалося створити унікальну задачу 😅');
     });
 });
 
 setInterval(() => {
     const now = Date.now();
-    const timeout = 5 * 60 * 1000;
-
     for (const [chatId, data] of activeGenerations.entries()) {
-        if (now - data.startTime > timeout) {
+        if (now - data.startTime > 5 * 60 * 1000) {
             activeGenerations.delete(chatId);
         }
     }
