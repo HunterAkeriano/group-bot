@@ -90,7 +90,7 @@ bot.start(async ctx => {
 
 bot.hears('🧠 Сгенерувати блог', ctx => {
     protectedGeneration(ctx, 'blog', async (ctx) => {
-        await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
+        const loadingMessage = await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
 
         let blogIdea = '';
         let attempts = 0;
@@ -117,18 +117,16 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
                 attempts++;
             }
         } catch (error) {
-            await ctx.reply('⚠️ Помилка [1/2] при генерації ідеї. Спробуй ще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Помилка [1/2] при генерації ідеї. Спробуй ще раз.');
             return;
         }
-
 
         if (!blogIdea) {
-            await ctx.reply('⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
             return;
         }
 
-        await ctx.reply(`✨ <b>Ідея для блогу:</b>\n\n${blogIdea}`, { parse_mode: 'HTML' });
-        await ctx.reply('✍️ Генерую повний блог-пост...');
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `✨ <b>Ідея для блогу:</b>\n\n${blogIdea}\n\n✍️ Генерую повний блог-пост...`, { parse_mode: 'HTML' });
 
         const postPrompt = `
         Створи великий телеграм-пост українською (1500–2200 символів)
@@ -139,16 +137,17 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
         try {
             const postResult = await model.generateContent(postPrompt);
             const styledPost = cleanPostText(postResult.response.text());
+            await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
             await ctx.reply(styledPost);
         } catch (error) {
-            await ctx.reply('⚠️ Помилка [2/2] при генерації самого блог-поста. Спробуй ще раз.');
+            await ctx.reply(`⚠️ Помилка [2/2] при генерації самого блог-поста: ${error.message}. Спробуй ще раз.`);
         }
     });
 });
 
 bot.hears('🧩 Сгенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz', async (ctx) => {
-        await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
+        const loadingMessage = await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
 
         let question = '';
         let options = [];
@@ -203,15 +202,16 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
                 break;
             }
         } catch (error) {
-            await ctx.reply('⚠️ Помилка [1/3] при генерації запитання для опитування. Спробуй ще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Помилка [1/3] при генерації запитання для опитування. Спробуй ще раз.');
             return;
         }
-
 
         if (!question) {
-            await ctx.reply('⚠️ Не вдалося знайти нове запитання 😅');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Не вдалося знайти нове запитання 😅');
             return;
         }
+
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `✅ Питання готове. ⏳ Надсилаю опитування та генерую пояснення...`);
 
         try {
             await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
@@ -233,16 +233,17 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
         try {
             const postResult = await model.generateContent(postPrompt);
             const styledPost = cleanPostText(postResult.response.text());
+            await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
             await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
         } catch (error) {
-            await ctx.reply('⚠️ Помилка [3/3] при генерації пояснювального поста для опитування. Спробуй ще раз.');
+            await ctx.reply(`⚠️ Помилка [3/3] при генерації пояснювального поста для опитування: ${error.message}. Спробуй ще раз.`);
         }
     });
 });
 
 bot.hears('🎭 Сгенерувати цитату', ctx => {
     protectedGeneration(ctx, 'quote', async (ctx) => {
-        await ctx.reply('😎 Генерую настрій розробника...');
+        const loadingMessage = await ctx.reply('😎 Генерую настрій розробника...');
 
         const quotePrompt = `
         Придумай коротку дотепну цитату українською (до 200 символів)
@@ -259,23 +260,24 @@ bot.hears('🎭 Сгенерувати цитату', ctx => {
 
                 if (!isDuplicateIdea(quote)) {
                     saveUsedTopic(quote);
+                    await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
                     await ctx.reply(`💬 <b>Цитата розробника:</b>\n\n${quote}`, { parse_mode: 'HTML' });
                     return;
                 }
                 attempts++;
             }
         } catch (error) {
-            await ctx.reply('⚠️ Помилка при генерації цитати. Спробуй ще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `⚠️ Помилка при генерації цитати: ${error.message}. Спробуй ще раз.`);
             return;
         }
 
-        await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Усі цитати вже використовувались 😅');
     });
 });
 
 bot.hears('🧮 Зробити задачу', ctx => {
     protectedGeneration(ctx, 'task', async (ctx) => {
-        await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
+        const loadingMessage = await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
 
         const taskPrompt = `
         Створи коротку практичну задачу з JavaScript українською.
@@ -298,17 +300,18 @@ bot.hears('🧮 Зробити задачу', ctx => {
 
                 if (!isDuplicateIdea(task)) {
                     saveUsedTopic(task);
+                    await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
                     await ctx.reply(task);
                     return;
                 }
                 attempts++;
             }
         } catch (error) {
-            await ctx.reply('⚠️ Помилка при генерації задачі. Спробуй ще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `⚠️ Помилка при генерації задачі: ${error.message}. Спробуй ще раз.`);
             return;
         }
 
-        await ctx.reply('⚠️ Не вдалося створити унікальну задачу 😅');
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '⚠️ Не вдалося створити унікальну задачу 😅');
     });
 });
 
