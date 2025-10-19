@@ -89,8 +89,8 @@ bot.start(async ctx => {
 });
 
 bot.hears('🧠 Сгенерувати блог', ctx => {
-    protectedGeneration(ctx, 'blog', async (c) => {
-        await c.reply('🌀 Генерую унікальну ідею для блогу...');
+    protectedGeneration(ctx, 'blog', async (ctx) => {
+        await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
 
         let blogIdea = '';
         let attempts = 0;
@@ -117,12 +117,12 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
         }
 
         if (!blogIdea) {
-            await c.reply('⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
+            await ctx.reply('⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
             return;
         }
 
-        await c.reply(`✨ <b>Ідея для блогу:</b>\n\n${blogIdea}`, { parse_mode: 'HTML' });
-        await c.reply('✍️ Генерую повний блог-пост...');
+        await ctx.reply(`✨ <b>Ідея для блогу:</b>\n\n${blogIdea}`, { parse_mode: 'HTML' });
+        await ctx.reply('✍️ Генерую повний блог-пост...');
 
         const postPrompt = `
         Створи великий телеграм-пост українською (1500–2200 символів)
@@ -132,13 +132,13 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
 
         const postResult = await model.generateContent(postPrompt);
         const styledPost = cleanPostText(postResult.response.text());
-        await c.reply(styledPost);
+        await ctx.reply(styledPost);
     });
 });
 
 bot.hears('🧩 Сгенерувати опитування', ctx => {
-    protectedGeneration(ctx, 'quiz', async (c) => {
-        await c.reply('🔄 Генерую унікальну фронтенд-вікторину...');
+    protectedGeneration(ctx, 'quiz', async (ctx) => {
+        await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
 
         let question = '';
         let options = [];
@@ -193,11 +193,11 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
         }
 
         if (!question) {
-            await c.reply('⚠️ Не вдалося знайти нове запитання 😅');
+            await ctx.reply('⚠️ Не вдалося знайти нове запитання 😅');
             return;
         }
 
-        await c.telegram.sendPoll(c.chat.id, question, options, {
+        await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
             type: 'quiz',
             correct_option_id: correct,
             explanation: explanation || 'Відповідь пояснюється у наступному пості!',
@@ -210,13 +210,13 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
         `;
         const postResult = await model.generateContent(postPrompt);
         const styledPost = cleanPostText(postResult.response.text());
-        await c.telegram.sendMessage(c.chat.id, styledPost);
+        await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
     });
 });
 
 bot.hears('🎭 Сгенерувати цитату', ctx => {
-    protectedGeneration(ctx, 'quote', async (c) => {
-        await c.reply('😎 Генерую настрій розробника...');
+    protectedGeneration(ctx, 'quote', async (ctx) => {
+        await ctx.reply('😎 Генерую настрій розробника...');
 
         const quotePrompt = `
         Придумай коротку дотепну цитату українською (до 200 символів)
@@ -232,19 +232,19 @@ bot.hears('🎭 Сгенерувати цитату', ctx => {
 
             if (!isDuplicateIdea(quote)) {
                 saveUsedTopic(quote);
-                await c.reply(`💬 <b>Цитата розробника:</b>\n\n${quote}`, { parse_mode: 'HTML' });
+                await ctx.reply(`💬 <b>Цитата розробника:</b>\n\n${quote}`, { parse_mode: 'HTML' });
                 return;
             }
             attempts++;
         }
 
-        await c.reply('⚠️ Усі цитати вже використовувались 😅');
+        await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
     });
 });
 
 bot.hears('🧮 Зробити задачу', ctx => {
-    protectedGeneration(ctx, 'task', async (c) => {
-        await c.reply('⚙️ Генерую цікаву JS-задачу...');
+    protectedGeneration(ctx, 'task', async (ctx) => {
+        await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
 
         const taskPrompt = `
         Створи коротку практичну задачу з JavaScript українською.
@@ -266,13 +266,13 @@ bot.hears('🧮 Зробити задачу', ctx => {
 
             if (!isDuplicateIdea(task)) {
                 saveUsedTopic(task);
-                await c.reply(task);
+                await ctx.reply(task);
                 return;
             }
             attempts++;
         }
 
-        await c.reply('⚠️ Не вдалося створити унікальну задачу 😅');
+        await ctx.reply('⚠️ Не вдалося створити унікальну задачу 😅');
     });
 });
 
