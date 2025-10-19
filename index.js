@@ -67,7 +67,8 @@ async function protectedGeneration(ctx, type, generator) {
         console.error(`Критична помилка генерації ${type}:`, error);
         await ctx.reply('⚠️ Критична помишка. Спробуй ще раз.');
     } finally {
-        if (activeGenerations.get(chatId)?.messageId === messageId) {
+        const currentData = activeGenerations.get(chatId);
+        if (currentData && currentData.messageId === messageId) {
             activeGenerations.delete(chatId);
         }
     }
