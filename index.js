@@ -12,8 +12,6 @@ const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 const USED_TOPICS_FILE = './used_topics.json';
 let usedTopics = [];
 
-// --- Допоміжні функції для збереження/порівняння тем ---
-
 if (fs.existsSync(USED_TOPICS_FILE)) {
     try {
         usedTopics = JSON.parse(fs.readFileSync(USED_TOPICS_FILE, 'utf-8'));
@@ -39,50 +37,45 @@ function isDuplicateIdea(newText) {
 
 function saveUsedTopic(topic) {
     usedTopics.push(topic);
-    // Обмеження розміру, щоб уникнути занадто великого файлу
     if (usedTopics.length > 500) {
         usedTopics = usedTopics.slice(-500);
     }
     fs.writeFileSync(USED_TOPICS_FILE, JSON.stringify(usedTopics, null, 2));
 }
 
-// --- Захист від подвійного натискання (Анти-цикл) ---
-
 const activeGenerations = new Map();
 
-/**
- * Універсальний обробник для команд, що генерують контент.
- * Встановлює/скидає прапор активності для захисту від подвійного натискання/дублікатів.
- */
 async function protectedGeneration(ctx, type, generator) {
     const chatId = ctx.chat.id;
+    const messageId = ctx.message.message_id;
 
-    if (activeGenerations.has(chatId)) {
+    const activeData = activeGenerations.get(chatId);
+
+    if (activeData) {
+        if (activeData.messageId === messageId) {
+            return;
+        }
         await ctx.reply('⏳ **УВАГА!** Попередня генерація ще не завершена. Зачекай ✋', { parse_mode: 'Markdown' });
         return;
     }
 
-    activeGenerations.set(chatId, { type, startTime: Date.now() });
-    console.log(`🟡 Генерація ${type} почалася для чату ${chatId}`);
+    activeGenerations.set(chatId, { type, messageId, startTime: Date.now() });
 
     try {
         await generator(ctx);
     } catch (error) {
-        console.error(`🔴 Критична помилка генерації ${type}:`, error);
-        await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
+        console.error(`Критична помилка генерації ${type}:`, error);
+        await ctx.reply('⚠️ Критична помишка. Спробуй ще раз.');
     } finally {
-        activeGenerations.delete(chatId);
-        console.log(`✅ Генерація ${type} завершена для чату ${chatId}`);
+        if (activeGenerations.get(chatId)?.messageId === messageId) {
+            activeGenerations.delete(chatId);
+        }
     }
 }
 
-// Хелпер для очищення тексту від markdown символів
 function cleanPostText(text) {
-    // Прибираємо Markdown/HTML символи, щоб уникнути помилок парсингу
     return text.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
-
-// --- Обробники команд ---
 
 bot.start(async ctx => {
     const keyboard = Markup.keyboard([
@@ -170,7 +163,6 @@ bot.hears('🧩 Сгенерувати опитування', async ctx => {
             const quizResult = await model.generateContent(quizPrompt);
             const text = quizResult.response.text();
 
-            // Використовуємо більш надійні регулярні вирази з прапором 's' (dotall) для багаторядкових блоків
             const questionMatch = text.match(/^QUESTION:\s*(.+?)\n/ms);
             const optionsMatch = text.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms);
             const correctMatch = text.match(/CORRECT:\s*(\d)/i);
@@ -284,18 +276,16 @@ bot.hears('🧮 Зробити задачу', async ctx => {
     });
 });
 
-// Таймаут для "застряглих" генерацій
 setInterval(() => {
     const now = Date.now();
-    const timeout = 5 * 60 * 1000; // 5 хвилин
+    const timeout = 5 * 60 * 1000;
 
     for (const [chatId, data] of activeGenerations.entries()) {
         if (now - data.startTime > timeout) {
-            console.log(`⚠️ Видалення застряглої генерації для чату ${chatId}`);
             activeGenerations.delete(chatId);
         }
     }
-}, 60000); // Перевірка кожну хвилину
+}, 60000);
 
 bot.launch();
-console.log('✅ Бот запущений з виправленим антицикл-захистом!');
+console.log('✅ Бот запущений!');
