@@ -40,30 +40,7 @@ function saveUsedTopic(topic) {
     fs.writeFileSync(USED_TOPICS_FILE, JSON.stringify(usedTopics, null, 2));
 }
 
-const activeGenerations = new Set();
-
-// FIX: Спочатку перевіряємо чи це повідомлення від користувача
-bot.use(async (ctx, next) => {
-    // Ігноруємо всі повідомлення які НЕ від реальних користувачів
-    if (!ctx.message || !ctx.message.text || ctx.message.via_bot) {
-        return;
-    }
-
-    // Ігноруємо повідомлення без команд/кнопок
-    const validCommands = [
-        '🧠 Сгенерувати блог',
-        '🧩 Сгенерувати опитування',
-        '🎭 Сгенерувати цитату',
-        '🧮 Зробити задачу',
-        '/start'
-    ];
-
-    if (!validCommands.includes(ctx.message.text)) {
-        return;
-    }
-
-    await next();
-});
+const activeGenerations = new Map(); // Змінено на Map для кращого відстеження
 
 bot.start(async ctx => {
     const keyboard = Markup.keyboard([
@@ -78,11 +55,16 @@ bot.start(async ctx => {
 
 bot.hears('🧠 Сгенерувати блог', async ctx => {
     const chatId = ctx.chat.id;
+    const messageId = ctx.message.message_id;
 
+    // КРИТИЧНО: Перевіряємо чи вже є активна генерація
     if (activeGenerations.has(chatId)) {
-        return ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        return; // ВАЖЛИВО: зупиняємо виконання
     }
-    activeGenerations.add(chatId);
+
+    // Додаємо з унікальним ідентифікатором
+    activeGenerations.set(chatId, { type: 'blog', messageId, startTime: Date.now() });
 
     try {
         await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
@@ -112,7 +94,8 @@ bot.hears('🧠 Сгенерувати блог', async ctx => {
         }
 
         if (!blogIdea) {
-            return ctx.reply('⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
+            await ctx.reply('⚠️ Не вдалося знайти нову тему, усі ідеї вже були 😅');
+            return;
         }
 
         await ctx.reply(`✨ <b>Ідея для блогу:</b>\n\n${blogIdea}`, { parse_mode: 'HTML' });
@@ -127,31 +110,31 @@ bot.hears('🧠 Сгенерувати блог', async ctx => {
         🐞 Знайшов баг? Не панікуй! ...
         `;
 
-        try {
-            const postResult = await model.generateContent(postPrompt);
-            let styledPost = postResult.response.text();
-            styledPost = styledPost.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
-            await ctx.reply(styledPost);
-        } catch (err) {
-            console.error(err);
-            await ctx.reply('⚠️ Помилка при генерації блогу.');
-        }
+        const postResult = await model.generateContent(postPrompt);
+        let styledPost = postResult.response.text();
+        styledPost = styledPost.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        await ctx.reply(styledPost);
 
     } catch (error) {
         console.error('Критична помилка генерації блогу:', error);
         await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
     } finally {
+        // КРИТИЧНО: завжди видаляємо після завершення
         activeGenerations.delete(chatId);
+        console.log(`✅ Генерація блогу завершена для чату ${chatId}`);
     }
 });
 
 bot.hears('🧩 Сгенерувати опитування', async ctx => {
     const chatId = ctx.chat.id;
+    const messageId = ctx.message.message_id;
 
     if (activeGenerations.has(chatId)) {
-        return ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        return;
     }
-    activeGenerations.add(chatId);
+
+    activeGenerations.set(chatId, { type: 'quiz', messageId, startTime: Date.now() });
 
     try {
         await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
@@ -208,44 +191,46 @@ bot.hears('🧩 Сгенерувати опитування', async ctx => {
             break;
         }
 
-        if (!question) return ctx.reply('⚠️ Не вдалося знайти нове запитання 😅');
-
-        try {
-            await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
-                type: 'quiz',
-                correct_option_id: correct,
-                explanation,
-                is_anonymous: true
-            });
-
-            const postPrompt = `
-            Створи український телеграм-пост (700–1200 символів)
-            для теми "${question}" у стилі короткого навчального поста.
-            `;
-            const postResult = await model.generateContent(postPrompt);
-            let styledPost = postResult.response.text();
-            styledPost = styledPost.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
-            await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
-        } catch (err) {
-            console.error(err);
-            await ctx.reply('⚠️ Помилка при створенні опитування.');
+        if (!question) {
+            await ctx.reply('⚠️ Не вдалося знайти нове запитання 😅');
+            return;
         }
+
+        await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
+            type: 'quiz',
+            correct_option_id: correct,
+            explanation,
+            is_anonymous: true
+        });
+
+        const postPrompt = `
+        Створи український телеграм-пост (700–1200 символів)
+        для теми "${question}" у стилі короткого навчального поста.
+        `;
+        const postResult = await model.generateContent(postPrompt);
+        let styledPost = postResult.response.text();
+        styledPost = styledPost.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
 
     } catch (error) {
         console.error('Критична помилка генерації опитування:', error);
         await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
     } finally {
         activeGenerations.delete(chatId);
+        console.log(`✅ Генерація опитування завершена для чату ${chatId}`);
     }
 });
 
 bot.hears('🎭 Сгенерувати цитату', async ctx => {
     const chatId = ctx.chat.id;
+    const messageId = ctx.message.message_id;
 
     if (activeGenerations.has(chatId)) {
-        return ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        return;
     }
-    activeGenerations.add(chatId);
+
+    activeGenerations.set(chatId, { type: 'quote', messageId, startTime: Date.now() });
 
     try {
         await ctx.reply('😎 Генерую настрій розробника...');
@@ -277,16 +262,20 @@ bot.hears('🎭 Сгенерувати цитату', async ctx => {
         await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
     } finally {
         activeGenerations.delete(chatId);
+        console.log(`✅ Генерація цитати завершена для чату ${chatId}`);
     }
 });
 
 bot.hears('🧮 Зробити задачу', async ctx => {
     const chatId = ctx.chat.id;
+    const messageId = ctx.message.message_id;
 
     if (activeGenerations.has(chatId)) {
-        return ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
+        return;
     }
-    activeGenerations.add(chatId);
+
+    activeGenerations.set(chatId, { type: 'task', messageId, startTime: Date.now() });
 
     try {
         await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
@@ -324,8 +313,22 @@ bot.hears('🧮 Зробити задачу', async ctx => {
         await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
     } finally {
         activeGenerations.delete(chatId);
+        console.log(`✅ Генерація задачі завершена для чату ${chatId}`);
     }
 });
 
+// Таймаут для "застряглих" генерацій (якщо щось пішло не так)
+setInterval(() => {
+    const now = Date.now();
+    const timeout = 5 * 60 * 1000; // 5 хвилин
+
+    for (const [chatId, data] of activeGenerations.entries()) {
+        if (now - data.startTime > timeout) {
+            console.log(`⚠️ Видалення застряглої генерації для чату ${chatId}`);
+            activeGenerations.delete(chatId);
+        }
+    }
+}, 60000); // Перевірка кожну хвилину
+
 bot.launch();
-console.log('✅ Бот запущений з антицикл-захистом і перевіркою унікальності!');
+console.log('✅ Бот запущений з виправленим антицикл-захистом!');
