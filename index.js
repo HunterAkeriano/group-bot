@@ -20,6 +20,7 @@ if (fs.existsSync(USED_TOPICS_FILE)) {
     }
 }
 
+// безопасное извлечение текста из ответа Gemini
 function getText(result) {
     return (
         result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
@@ -91,22 +92,23 @@ bot.start(async ctx => {
     await ctx.reply('Привіт! 👋 Обери, що хочеш згенерувати:', keyboard);
 });
 
+// 🧠 блог
 bot.hears('🧠 Сгенерувати блог', ctx => {
     protectedGeneration(ctx, 'blog', async (ctx) => {
         await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
 
         let blogIdea = '';
         for (let i = 0; i < 10; i++) {
-            const prompt = `
+            const ideaPrompt = `
       Придумай одну коротку, креативну ідею українською для телеграм-блогу про:
-      - роботу розробника, життя у сфері IT, мотивацію, технології або Node.js.
+      - роботу розробника, життя у сфері IT, мотивацію, технології, AI або Node.js.
       Формат:
       - лише 1 ідея (жодних списків)
       - до 70 символів
       - обов'язково почни з емодзі
       - не додавай лапки
       `;
-            const res = await model.generateContent([prompt]);
+            const res = await model.generateContent([ideaPrompt]);
             const idea = getText(res);
             if (idea && !isDuplicateIdea(idea)) {
                 blogIdea = idea;
@@ -129,11 +131,17 @@ bot.hears('🧠 Сгенерувати блог', ctx => {
     Тема: "${blogIdea}"
     `;
         const postRes = await model.generateContent([postPrompt]);
-        const post = cleanPostText(getText(postRes));
-        await ctx.reply(post);
+        const postText = getText(postRes);
+        if (!postText) {
+            await ctx.reply('⚠️ Не вдалося створити пост. Спробуй ще раз пізніше 😔');
+            return;
+        }
+        const styledPost = cleanPostText(postText);
+        await ctx.reply(styledPost);
     });
 });
 
+// 🧩 опитування
 bot.hears('🧩 Сгенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz', async (ctx) => {
         await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
@@ -189,11 +197,12 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
     для теми "${question}" у стилі короткого навчального поста.
     `;
         const postRes = await model.generateContent([postPrompt]);
-        const post = cleanPostText(getText(postRes));
-        await ctx.telegram.sendMessage(ctx.chat.id, post);
+        const postText = getText(postRes);
+        if (postText) await ctx.telegram.sendMessage(ctx.chat.id, cleanPostText(postText));
     });
 });
 
+// 🎭 цитата
 bot.hears('🎭 Сгенерувати цитату', ctx => {
     protectedGeneration(ctx, 'quote', async (ctx) => {
         await ctx.reply('😎 Генерую настрій розробника...');
@@ -206,7 +215,7 @@ bot.hears('🎭 Сгенерувати цитату', ctx => {
         for (let i = 0; i < 10; i++) {
             const res = await model.generateContent([prompt]);
             const quote = cleanPostText(getText(res));
-            if (!isDuplicateIdea(quote)) {
+            if (quote && !isDuplicateIdea(quote)) {
                 saveUsedTopic(quote);
                 await ctx.reply(`💬 <b>Цитата розробника:</b>\n\n${quote}`, { parse_mode: 'HTML' });
                 return;
@@ -216,6 +225,7 @@ bot.hears('🎭 Сгенерувати цитату', ctx => {
     });
 });
 
+// 🧮 задача
 bot.hears('🧮 Зробити задачу', ctx => {
     protectedGeneration(ctx, 'task', async (ctx) => {
         await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
@@ -235,7 +245,7 @@ bot.hears('🧮 Зробити задачу', ctx => {
         for (let i = 0; i < 10; i++) {
             const res = await model.generateContent([prompt]);
             const task = cleanPostText(getText(res));
-            if (!isDuplicateIdea(task)) {
+            if (task && !isDuplicateIdea(task)) {
                 saveUsedTopic(task);
                 await ctx.reply(task);
                 return;
@@ -248,9 +258,7 @@ bot.hears('🧮 Зробити задачу', ctx => {
 setInterval(() => {
     const now = Date.now();
     for (const [chatId, data] of activeGenerations.entries()) {
-        if (now - data.startTime > 5 * 60 * 1000) {
-            activeGenerations.delete(chatId);
-        }
+        if (now - data.startTime > 5 * 60 * 1000) activeGenerations.delete(chatId);
     }
 }, 60000);
 
