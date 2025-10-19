@@ -12,6 +12,8 @@ const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 const USED_TOPICS_FILE = './used_topics.json';
 let usedTopics = [];
 
+// --- Допоміжні функції для збереження/порівняння тем ---
+
 if (fs.existsSync(USED_TOPICS_FILE)) {
     try {
         usedTopics = JSON.parse(fs.readFileSync(USED_TOPICS_FILE, 'utf-8'));
@@ -37,10 +39,50 @@ function isDuplicateIdea(newText) {
 
 function saveUsedTopic(topic) {
     usedTopics.push(topic);
+    // Обмеження розміру, щоб уникнути занадто великого файлу
+    if (usedTopics.length > 500) {
+        usedTopics = usedTopics.slice(-500);
+    }
     fs.writeFileSync(USED_TOPICS_FILE, JSON.stringify(usedTopics, null, 2));
 }
 
-const activeGenerations = new Map(); // Змінено на Map для кращого відстеження
+// --- Захист від подвійного натискання (Анти-цикл) ---
+
+const activeGenerations = new Map();
+
+/**
+ * Універсальний обробник для команд, що генерують контент.
+ * Встановлює/скидає прапор активності для захисту від подвійного натискання/дублікатів.
+ */
+async function protectedGeneration(ctx, type, generator) {
+    const chatId = ctx.chat.id;
+
+    if (activeGenerations.has(chatId)) {
+        await ctx.reply('⏳ **УВАГА!** Попередня генерація ще не завершена. Зачекай ✋', { parse_mode: 'Markdown' });
+        return;
+    }
+
+    activeGenerations.set(chatId, { type, startTime: Date.now() });
+    console.log(`🟡 Генерація ${type} почалася для чату ${chatId}`);
+
+    try {
+        await generator(ctx);
+    } catch (error) {
+        console.error(`🔴 Критична помилка генерації ${type}:`, error);
+        await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
+    } finally {
+        activeGenerations.delete(chatId);
+        console.log(`✅ Генерація ${type} завершена для чату ${chatId}`);
+    }
+}
+
+// Хелпер для очищення тексту від markdown символів
+function cleanPostText(text) {
+    // Прибираємо Markdown/HTML символи, щоб уникнути помилок парсингу
+    return text.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// --- Обробники команд ---
 
 bot.start(async ctx => {
     const keyboard = Markup.keyboard([
@@ -54,19 +96,7 @@ bot.start(async ctx => {
 });
 
 bot.hears('🧠 Сгенерувати блог', async ctx => {
-    const chatId = ctx.chat.id;
-    const messageId = ctx.message.message_id;
-
-    // КРИТИЧНО: Перевіряємо чи вже є активна генерація
-    if (activeGenerations.has(chatId)) {
-        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
-        return; // ВАЖЛИВО: зупиняємо виконання
-    }
-
-    // Додаємо з унікальним ідентифікатором
-    activeGenerations.set(chatId, { type: 'blog', messageId, startTime: Date.now() });
-
-    try {
+    await protectedGeneration(ctx, 'blog', async () => {
         await ctx.reply('🌀 Генерую унікальну ідею для блогу...');
 
         let blogIdea = '';
@@ -80,7 +110,7 @@ bot.hears('🧠 Сгенерувати блог', async ctx => {
             - лише 1 ідея (жодних списків)
             - до 70 символів
             - обов'язково почни з емодзі
-            - не додавай лапки, не пиши слово "Ідея"
+            - не додавай лапки
             `;
             const ideaResult = await model.generateContent(ideaPrompt);
             const idea = ideaResult.response.text().trim();
@@ -105,38 +135,16 @@ bot.hears('🧠 Сгенерувати блог', async ctx => {
         Створи великий телеграм-пост українською (1500–2200 символів)
         у стилі сучасного IT-блогу.
         Тема: "${blogIdea}"
-        Формат як приклад 👇
-        💡 Баг — то квест. Розв'яжи та прокачай скіл!
-        🐞 Знайшов баг? Не панікуй! ...
         `;
 
         const postResult = await model.generateContent(postPrompt);
-        let styledPost = postResult.response.text();
-        styledPost = styledPost.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        const styledPost = cleanPostText(postResult.response.text());
         await ctx.reply(styledPost);
-
-    } catch (error) {
-        console.error('Критична помилка генерації блогу:', error);
-        await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
-    } finally {
-        // КРИТИЧНО: завжди видаляємо після завершення
-        activeGenerations.delete(chatId);
-        console.log(`✅ Генерація блогу завершена для чату ${chatId}`);
-    }
+    });
 });
 
 bot.hears('🧩 Сгенерувати опитування', async ctx => {
-    const chatId = ctx.chat.id;
-    const messageId = ctx.message.message_id;
-
-    if (activeGenerations.has(chatId)) {
-        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
-        return;
-    }
-
-    activeGenerations.set(chatId, { type: 'quiz', messageId, startTime: Date.now() });
-
-    try {
+    await protectedGeneration(ctx, 'quiz', async () => {
         await ctx.reply('🔄 Генерую унікальну фронтенд-вікторину...');
 
         let question = '';
@@ -161,10 +169,12 @@ bot.hears('🧩 Сгенерувати опитування', async ctx => {
 
             const quizResult = await model.generateContent(quizPrompt);
             const text = quizResult.response.text();
-            const questionMatch = text.match(/QUESTION:\s*(.+)/i);
-            const optionsMatch = text.match(/OPTIONS:[\s\S]*?(?=CORRECT:)/i);
+
+            // Використовуємо більш надійні регулярні вирази з прапором 's' (dotall) для багаторядкових блоків
+            const questionMatch = text.match(/^QUESTION:\s*(.+?)\n/ms);
+            const optionsMatch = text.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms);
             const correctMatch = text.match(/CORRECT:\s*(\d)/i);
-            const explanationMatch = text.match(/EXPLANATION:\s*(.+)/i);
+            const explanationMatch = text.match(/EXPLANATION:\s*(.+)/is);
 
             if (!questionMatch || !optionsMatch || !correctMatch) {
                 attempts++;
@@ -179,8 +189,7 @@ bot.hears('🧩 Сгенерувати опитування', async ctx => {
 
             question = q;
             saveUsedTopic(q);
-            options = optionsMatch[0]
-                .replace('OPTIONS:', '')
+            options = optionsMatch[1]
                 .trim()
                 .split(/\d\)\s*/)
                 .filter(Boolean)
@@ -199,7 +208,7 @@ bot.hears('🧩 Сгенерувати опитування', async ctx => {
         await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
             type: 'quiz',
             correct_option_id: correct,
-            explanation,
+            explanation: explanation || 'Відповідь пояснюється у наступному пості!',
             is_anonymous: true
         });
 
@@ -208,31 +217,13 @@ bot.hears('🧩 Сгенерувати опитування', async ctx => {
         для теми "${question}" у стилі короткого навчального поста.
         `;
         const postResult = await model.generateContent(postPrompt);
-        let styledPost = postResult.response.text();
-        styledPost = styledPost.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        const styledPost = cleanPostText(postResult.response.text());
         await ctx.telegram.sendMessage(ctx.chat.id, styledPost);
-
-    } catch (error) {
-        console.error('Критична помилка генерації опитування:', error);
-        await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
-    } finally {
-        activeGenerations.delete(chatId);
-        console.log(`✅ Генерація опитування завершена для чату ${chatId}`);
-    }
+    });
 });
 
 bot.hears('🎭 Сгенерувати цитату', async ctx => {
-    const chatId = ctx.chat.id;
-    const messageId = ctx.message.message_id;
-
-    if (activeGenerations.has(chatId)) {
-        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
-        return;
-    }
-
-    activeGenerations.set(chatId, { type: 'quote', messageId, startTime: Date.now() });
-
-    try {
+    await protectedGeneration(ctx, 'quote', async () => {
         await ctx.reply('😎 Генерую настрій розробника...');
 
         const quotePrompt = `
@@ -245,7 +236,7 @@ bot.hears('🎭 Сгенерувати цитату', async ctx => {
         while (attempts < 10) {
             const quoteResult = await model.generateContent(quotePrompt);
             let quote = quoteResult.response.text().trim();
-            quote = quote.replace(/[*_`<>]/g, '').replace(/\n{2,}/g, '\n').trim();
+            quote = cleanPostText(quote).replace(/\n{2,}/g, '\n');
 
             if (!isDuplicateIdea(quote)) {
                 saveUsedTopic(quote);
@@ -256,28 +247,11 @@ bot.hears('🎭 Сгенерувати цитату', async ctx => {
         }
 
         await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
-
-    } catch (error) {
-        console.error('Критична помилка генерації цитати:', error);
-        await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
-    } finally {
-        activeGenerations.delete(chatId);
-        console.log(`✅ Генерація цитати завершена для чату ${chatId}`);
-    }
+    });
 });
 
 bot.hears('🧮 Зробити задачу', async ctx => {
-    const chatId = ctx.chat.id;
-    const messageId = ctx.message.message_id;
-
-    if (activeGenerations.has(chatId)) {
-        await ctx.reply('⏳ Зачекай, попередня генерація ще не завершилася!');
-        return;
-    }
-
-    activeGenerations.set(chatId, { type: 'task', messageId, startTime: Date.now() });
-
-    try {
+    await protectedGeneration(ctx, 'task', async () => {
         await ctx.reply('⚙️ Генерую цікаву JS-задачу...');
 
         const taskPrompt = `
@@ -296,8 +270,7 @@ bot.hears('🧮 Зробити задачу', async ctx => {
         let attempts = 0;
         while (attempts < 10) {
             const result = await model.generateContent(taskPrompt);
-            let task = result.response.text().trim();
-            task = task.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+            const task = cleanPostText(result.response.text());
 
             if (!isDuplicateIdea(task)) {
                 saveUsedTopic(task);
@@ -308,16 +281,10 @@ bot.hears('🧮 Зробити задачу', async ctx => {
         }
 
         await ctx.reply('⚠️ Не вдалося створити унікальну задачу 😅');
-    } catch (error) {
-        console.error('Критична помилка генерації задачі:', error);
-        await ctx.reply('⚠️ Критична помилка. Спробуй ще раз.');
-    } finally {
-        activeGenerations.delete(chatId);
-        console.log(`✅ Генерація задачі завершена для чату ${chatId}`);
-    }
+    });
 });
 
-// Таймаут для "застряглих" генерацій (якщо щось пішло не так)
+// Таймаут для "застряглих" генерацій
 setInterval(() => {
     const now = Date.now();
     const timeout = 5 * 60 * 1000; // 5 хвилин
