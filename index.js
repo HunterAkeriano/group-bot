@@ -148,10 +148,12 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
         let options = [];
         let correct = 0;
         let explanation = '';
+        let attempts = 0;
 
-        for (let i = 0; i < 10; i++) {
+        while (!question && attempts < 10) {
+            attempts++;
             const prompt = `
-      Створи одне складне запитання з фронтенду (HTML, CSS, JavaScript або Vue.js).
+      Створи одне складне запитання з фронтенду (HTML, CSS, JavaScript або Vue.js).(не більше 300 символів)
       Формат:
       QUESTION: ...
       OPTIONS:
@@ -165,16 +167,26 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
             const res = await model.generateContent([prompt]);
             const text = getText(res);
 
-            const q = text.match(/^QUESTION:\s*(.+?)\n/ms)?.[1]?.trim();
-            if (!q || isDuplicateIdea(q)) continue;
+            const qMatch = text.match(/^QUESTION:\s*(.+?)\n/ms);
+            if (!qMatch) continue;
 
-            question = q;
-            saveUsedTopic(q);
+            const qCandidate = qMatch[1]?.trim();
+            if (!qCandidate || isDuplicateIdea(qCandidate)) continue;
 
             const optionsBlock = text.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms)?.[1] || '';
-            options = optionsBlock.split(/\d\)\s*/).filter(Boolean).map(o => o.trim().slice(0, 70));
-            correct = Number(text.match(/CORRECT:\s*(\d)/)?.[1]) - 1 || 0;
+            const optionsCandidate = optionsBlock.split(/\d\)\s*/).filter(Boolean).map(o => o.trim().slice(0, 70)).filter(o => o.length > 0);
+
+            if (optionsCandidate.length < 4) continue;
+
+            const correctCandidate = Number(text.match(/CORRECT:\s*(\d)/)?.[1]) - 1;
+            if (correctCandidate < 0 || correctCandidate >= optionsCandidate.length) continue;
+
+            question = qCandidate;
+            options = optionsCandidate;
+            correct = correctCandidate;
             explanation = text.match(/EXPLANATION:\s*(.+)/is)?.[1]?.trim()?.slice(0, 200) || '';
+
+            saveUsedTopic(question);
             break;
         }
 
@@ -183,10 +195,12 @@ bot.hears('🧩 Сгенерувати опитування', ctx => {
             return;
         }
 
+        const finalExplanation = explanation || 'Відповідь пояснюється у наступному пості!';
+
         await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
             type: 'quiz',
             correct_option_id: correct,
-            explanation: explanation || 'Відповідь пояснюється у наступному пості!',
+            explanation: finalExplanation,
             is_anonymous: true
         });
 
