@@ -501,57 +501,55 @@ async function generateStoryTopics(ctx, numTopics = 5) {
 
 async function generateStoryParts(ctx, text) {
     const chatId = ctx.chat.id;
-    let context = '';
-    const MAX_LENGTH = 1100;
-
     await ctx.reply(`🚨 **Вибрана клікбейт тема:**\n\n${text}`, { parse_mode: 'Markdown' });
-    const waitMessage = await ctx.reply('📚 Генерую Частину 1...');
+
+    const waitMessage = await ctx.reply('📚 Генерую повну історію...');
 
     try {
-        const prompt1 = `Створи захоплюючий, клікбейтний ПОЧАТОК історії українською на тему: "${text}". Розкажи її від першої особи (Я). Текст має бути приблизно ${MAX_LENGTH} символів. Він повинен обірватися на КРАЙНЬОМУ кліфгенгері та закінчуватися фразою, що закликає чекати на продовження.`;
-        let res1 = await model.generateContent([prompt1]);
-        let part1 = cleanPostText(getText(res1));
+        const prompt = `
+Створи українську клікбейт-історію приблизно на 3300 символів на тему "${text}".
+Форматуй як звичайний текст, без розділів "Частина 1", "Частина 2" тощо.
+Історія повинна бути у стилі телеграм-поста, від першої особи (Я),
+з інтригою, драмою, фінальною розв'язкою і моральним висновком.
+        `;
 
-        if (!part1) throw new Error('Part 1 generation failed');
+        const res = await model.generateContent([prompt]);
+        const fullText = cleanPostText(getText(res));
 
-        context = part1;
-        await ctx.telegram.editMessageText(chatId, waitMessage.message_id, undefined, '📚 Генерую Частину 2...');
+        if (!fullText || fullText.length < 1000) {
+            await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
+            await ctx.reply('⚠️ Не вдалося створити історію. Спробуй ще раз 😔', getMainMenuKeyboard());
+            return;
+        }
 
-        await ctx.reply(`**🤯 Історія: ${text} – Частина 1/3**\n\n${part1}\n\n*_Продовження буде завтра! Не пропусти!_`, { parse_mode: 'Markdown' });
-
-        const prompt2 = `Продовж клікбейтну історію (СЕРЕДИНА) українською. Попередня частина: "${context}". Текст має бути приблизно ${MAX_LENGTH} символів. Посиль проблему і закінчи на ще більш шокуючому кліфгенгері, що закликає чекати на розв'язку.`;
-        let res2 = await model.generateContent([prompt2]);
-        let part2 = cleanPostText(getText(res2));
-
-        if (!part2) throw new Error('Part 2 generation failed');
-
-        context += `\n\n${part2}`;
-        await ctx.telegram.editMessageText(chatId, waitMessage.message_id, undefined, '📚 Генерую Частину 3 (Розв\'язка)...');
-
-        await ctx.reply(`**💰 Історія: ${text} – Частина 2/3**\n\n${part2}\n\n*_Чи вдасться мені вибратися з цього? Дізнайся у розв'язці!_`, { parse_mode: 'Markdown' });
-
-        const prompt3 = `Створи несподівану РОЗВ'ЯЗКУ клікбейт історії українською. Попередні частини: "${context}". Текст має бути приблизно ${MAX_LENGTH} символів. Додай висновок або мораль в кінці.`;
-        let res3 = await model.generateContent([prompt3]);
-        let part3 = cleanPostText(getText(res3));
-
-        if (!part3) throw new Error('Part 3 generation failed');
+        // розділити на 3 частини рівномірно
+        const partSize = Math.ceil(fullText.length / 3);
+        const parts = [
+            fullText.slice(0, partSize),
+            fullText.slice(partSize, partSize * 2),
+            fullText.slice(partSize * 2)
+        ].map(p => p.trim());
 
         await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
 
-        await ctx.reply(`**✅ Історія: ${text} – Розв'язка 3/3**\n\n${part3}\n\n*_Кінець історії. Що я зробив не так?_`, { parse_mode: 'Markdown' });
+        // Надсилання 3-х постів
+        await ctx.reply(`**🤯 Історія: ${text} – Частина 1/3**\n\n${parts[0]}\n\n*_Продовження буде завтра!_*`, { parse_mode: 'Markdown' });
+        await ctx.reply(`**💰 Історія: ${text} – Частина 2/3**\n\n${parts[1]}\n\n*_Кінець уже близько..._*`, { parse_mode: 'Markdown' });
+        await ctx.reply(`**✅ Історія: ${text} – Частина 3/3 (Розв'язка)**\n\n${parts[2]}\n\n*_Кінець історії. Поділися думками!*_`, { parse_mode: 'Markdown' });
 
         saveUsedTopic(text);
-
-        await ctx.reply('✅ Усі 3 клікбейт-пости згенеровано!', getMainMenuKeyboard());
+        await ctx.reply('✅ Усі 3 частини історії згенеровано!', getMainMenuKeyboard());
 
     } catch (error) {
+        console.error('❌ Story generation error:', error);
         await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
-        await ctx.reply('⚠️ Не вдалося створити всі частини історії. Спробуй ще раз пізніше 😔', getMainMenuKeyboard());
+        await ctx.reply('⚠️ Помилка під час створення історії. Спробуй ще раз 😔', getMainMenuKeyboard());
     } finally {
         userStoryTopics.delete(chatId);
         userCurrentMode.delete(chatId);
     }
 }
+
 
 bot.hears('📖 Згенерувати історію', ctx => {
     if (!checkAccess(ctx)) return;
