@@ -66,6 +66,7 @@ const activeGenerations = new Map();
 const userBlogTopics = new Map();
 const userTaskTopics = new Map();
 const userQuizTopics = new Map();
+const userQuoteTopics = new Map();
 const userCurrentMode = new Map();
 
 function protectedGeneration(ctx, type, generator) {
@@ -395,24 +396,6 @@ bot.hears('🧩 Згенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
 });
 
-bot.hears(/🎭\s*Згенерувати цитату/i, ctx => {
-    if (!checkAccess(ctx)) return;
-    protectedGeneration(ctx, 'quote', async (ctx) => {
-        await ctx.reply('😎 Генерую настрій розробника...');
-
-        const prompt = `Придумай одну коротку дотепну цитату українською (до 200 символів) про життя або філософію розробника. Без лапок, лише текст у стилі Telegram, з емодзі.`;
-        const res = await model.generateContent([prompt]);
-        const quote = cleanPostText(getText(res));
-
-        if (quote && !isDuplicateIdea(quote)) {
-            saveUsedTopic(quote);
-            await ctx.reply(`💬 **Цитата розробника:**\n\n${quote}`, { parse_mode: 'Markdown' });
-        } else {
-            await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
-        }
-    });
-});
-
 bot.hears('🔄 Перегенерувати вікторини', ctx => {
     if (!checkAccess(ctx)) return;
     const chatId = ctx.chat.id;
@@ -423,12 +406,88 @@ bot.hears('🔄 Перегенерувати вікторини', ctx => {
     }
 });
 
+async function generateQuoteTopics(ctx, numTopics = 10) {
+    const chatId = ctx.chat.id;
+    await ctx.reply(`😎 Генерую ${numTopics} цитат розробника...`);
+
+    const prompt = `
+Придумай ${numTopics} коротких, дотепних цитат українською про життя або філософію розробника/айтішника.
+Кожна цитата:
+- до 100 символів
+- без лапок
+- почни з емодзі
+- нумерована з 1 до ${numTopics}
+Формат:
+1) емодзі + цитата
+2) емодзі + цитата
+...
+`;
+    const result = await model.generateContent([prompt]);
+    const text = getText(result);
+
+    const lines = text.split('\n').filter(l => l.trim());
+    const newQuotes = [];
+
+    for (const line of lines) {
+        const match = line.match(/^\d+\)\s*(.+)$/);
+        if (match) {
+            newQuotes.push(match[1].trim());
+        }
+    }
+
+    if (newQuotes.length < 5) {
+        await ctx.reply('⚠️ Не вдалося знайти нових цитат 😅', getMainMenuKeyboard());
+        return;
+    }
+
+    userQuoteTopics.set(chatId, newQuotes);
+    userCurrentMode.set(chatId, 'quote');
+
+    await ctx.reply('Обери цитату:', getTopicsKeyboard(newQuotes, '🔄 Перегенерувати цитати'));
+}
+
+async function generateQuotePost(ctx, text) {
+    const chatId = ctx.chat.id;
+
+    const styledQuote = cleanPostText(text);
+
+    saveUsedTopic(text);
+    userQuoteTopics.delete(chatId);
+    userCurrentMode.delete(chatId);
+
+    await ctx.reply(`💬 **Вибрана цитата розробника:**\n\n${styledQuote}`, { parse_mode: 'Markdown' });
+    await ctx.reply('Обери, що хочеш згенерувати далі:', getMainMenuKeyboard());
+}
+
+
+bot.hears('🎭 Згенерувати цитату', ctx => {
+    if (!checkAccess(ctx)) return;
+    protectedGeneration(ctx, 'quote_topics', generateQuoteTopics);
+});
+
+bot.hears('🔄 Перегенерувати цитати', ctx => {
+    if (!checkAccess(ctx)) return;
+    const chatId = ctx.chat.id;
+    const mode = userCurrentMode.get(chatId);
+
+    if (mode === 'quote') {
+        protectedGeneration(ctx, 'quote_topics', generateQuoteTopics);
+    }
+});
+
 bot.on('text', async ctx => {
     if (!checkAccess(ctx)) return;
 
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
     const mode = userCurrentMode.get(chatId);
+
+    const MAIN_MENU_BUTTONS = ['🧠 Згенерувати блог', '🧩 Згенерувати опитування', '🎭 Згенерувати цитату', '🧮 Зробити задачу'];
+    const TOPIC_REGENERATE_BUTTONS = ['🔄 Перегенерувати теми', '🔄 Перегенерувати задачі', '🔄 Перегенерувати вікторини', '🔄 Перегенерувати цитати'];
+
+    if (MAIN_MENU_BUTTONS.includes(text) || TOPIC_REGENERATE_BUTTONS.includes(text)) {
+        return;
+    }
 
     if (text === '⬅️ Назад в меню') {
         userCurrentMode.delete(chatId);
@@ -456,9 +515,18 @@ bot.on('text', async ctx => {
         const topics = userQuizTopics.get(chatId);
         if (topics && topics.includes(text)) {
             protectedGeneration(ctx, 'quiz_post', (ctx) => generateQuizPost(ctx, text));
+            return;
+        }
+    }
+
+    if (mode === 'quote') {
+        const topics = userQuoteTopics.get(chatId);
+        if (topics && topics.includes(text)) {
+            protectedGeneration(ctx, 'quote_post', (ctx) => generateQuotePost(ctx, text));
         }
     }
 });
+
 
 setInterval(() => {
     const now = Date.now();
