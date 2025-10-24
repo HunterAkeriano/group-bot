@@ -17,6 +17,9 @@ const model = genAI.getGenerativeModel({
     }
 });
 
+const ALLOWED_USERNAMES_STRING = process.env.ALLOWED_USERNAMES || '';
+const ALLOWED_USERNAMES = ALLOWED_USERNAMES_STRING.split(',').map(name => name.trim().toLowerCase()).filter(name => name.length > 0);
+
 const USED_TOPICS_FILE = './used_topics.json';
 let usedTopics = [];
 
@@ -113,7 +116,20 @@ function getTopicsKeyboard(topics, regenerateText = '🔄 Перегенерув
     return Markup.keyboard(keyboard).resize();
 }
 
+function checkAccess(ctx) {
+    if (ALLOWED_USERNAMES.length === 0) return true;
+    const userUsername = ctx.from?.username?.toLowerCase();
+
+    if (userUsername && ALLOWED_USERNAMES.includes(userUsername)) {
+        return true;
+    }
+    ctx.reply('❌ Зайнятий. Іди нахуй.', getMainMenuKeyboard());
+    return false;
+}
+
 bot.start(async ctx => {
+    if (!checkAccess(ctx)) return;
+
     const chatId = ctx.chat.id;
     userCurrentMode.delete(chatId);
     await ctx.reply('Привіт! 👋 Обери, що хочеш згенерувати:', getMainMenuKeyboard());
@@ -188,10 +204,12 @@ async function generateBlogPost(ctx, text) {
 }
 
 bot.hears('🧠 Сгенерувати блог', ctx => {
+    if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'blog_topics', generateBlogTopics);
 });
 
 bot.hears('🔄 Перегенерувати теми', ctx => {
+    if (!checkAccess(ctx)) return;
     const chatId = ctx.chat.id;
     const mode = userCurrentMode.get(chatId);
 
@@ -264,10 +282,12 @@ async function generateTaskPost(ctx, text) {
 }
 
 bot.hears('🧮 Зробити задачу', ctx => {
+    if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'task_topics', generateTaskTopics);
 });
 
 bot.hears('🔄 Перегенерувати задачі', ctx => {
+    if (!checkAccess(ctx)) return;
     const chatId = ctx.chat.id;
     const mode = userCurrentMode.get(chatId);
 
@@ -371,10 +391,12 @@ async function generateQuizPost(ctx, text) {
 }
 
 bot.hears('🧩 Сгенерувати опитування', ctx => {
+    if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
 });
 
 bot.hears('🔄 Перегенерувати вікторини', ctx => {
+    if (!checkAccess(ctx)) return;
     const chatId = ctx.chat.id;
     const mode = userCurrentMode.get(chatId);
 
@@ -384,6 +406,8 @@ bot.hears('🔄 Перегенерувати вікторини', ctx => {
 });
 
 bot.on('text', async ctx => {
+    if (!checkAccess(ctx)) return;
+
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
     const mode = userCurrentMode.get(chatId);
@@ -420,6 +444,7 @@ bot.on('text', async ctx => {
 });
 
 bot.hears('🎭 Сгенерувати цитату', ctx => {
+    if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'quote', async (ctx) => {
         await ctx.reply('😎 Генерую настрій розробника...');
 
