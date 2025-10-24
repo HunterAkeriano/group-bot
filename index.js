@@ -395,6 +395,24 @@ bot.hears('🧩 Згенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
 });
 
+bot.hears(/🎭\s*Згенерувати цитату/i, ctx => {
+    if (!checkAccess(ctx)) return;
+    protectedGeneration(ctx, 'quote', async (ctx) => {
+        await ctx.reply('😎 Генерую настрій розробника...');
+
+        const prompt = `Придумай одну коротку дотепну цитату українською (до 200 символів) про життя або філософію розробника. Без лапок, лише текст у стилі Telegram, з емодзі.`;
+        const res = await model.generateContent([prompt]);
+        const quote = cleanPostText(getText(res));
+
+        if (quote && !isDuplicateIdea(quote)) {
+            saveUsedTopic(quote);
+            await ctx.reply(`💬 **Цитата розробника:**\n\n${quote}`, { parse_mode: 'Markdown' });
+        } else {
+            await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
+        }
+    });
+});
+
 bot.hears('🔄 Перегенерувати вікторини', ctx => {
     if (!checkAccess(ctx)) return;
     const chatId = ctx.chat.id;
@@ -440,24 +458,6 @@ bot.on('text', async ctx => {
             protectedGeneration(ctx, 'quiz_post', (ctx) => generateQuizPost(ctx, text));
         }
     }
-});
-
-bot.hears(/🎭\s*Згенерувати цитату/i, ctx => {
-    if (!checkAccess(ctx)) return;
-    protectedGeneration(ctx, 'quote', async (ctx) => {
-        await ctx.reply('😎 Генерую настрій розробника...');
-
-        const prompt = `Придумай одну коротку дотепну цитату українською (до 200 символів) про життя або філософію розробника. Без лапок, лише текст у стилі Telegram, з емодзі.`;
-        const res = await model.generateContent([prompt]);
-        const quote = cleanPostText(getText(res));
-
-        if (quote && !isDuplicateIdea(quote)) {
-            saveUsedTopic(quote);
-            await ctx.reply(`💬 **Цитата розробника:**\n\n${quote}`, { parse_mode: 'Markdown' });
-        } else {
-            await ctx.reply('⚠️ Усі цитати вже використовувались 😅');
-        }
-    });
 });
 
 setInterval(() => {
