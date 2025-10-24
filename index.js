@@ -499,18 +499,25 @@ async function generateStoryTopics(ctx, numTopics = 5) {
     await ctx.reply('Обери тему для клікбейт історії:', getTopicsKeyboard(newTopics, '🔄 Перегенерувати теми'));
 }
 
+function escapeMarkdown(text) {
+    // Экранируем спецсимволы Telegram Markdown
+    return text
+        .replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
+        .replace(/\\/g, '\\\\'); // двойное экранирование слэшей
+}
+
 async function generateStoryParts(ctx, text) {
     const chatId = ctx.chat.id;
-    await ctx.reply(`🚨 **Вибрана клікбейт тема:**\n\n${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply(`🚨 **Вибрана клікбейт тема:**\n\n${escapeMarkdown(text)}`, { parse_mode: 'MarkdownV2' });
 
     const waitMessage = await ctx.reply('📚 Генерую повну історію...');
 
     try {
         const prompt = `
 Створи українську клікбейт-історію приблизно на 3300 символів на тему "${text}".
-Форматуй як звичайний текст, без розділів "Частина 1", "Частина 2" тощо.
 Історія повинна бути у стилі телеграм-поста, від першої особи (Я),
 з інтригою, драмою, фінальною розв'язкою і моральним висновком.
+Без заголовків "Частина 1" тощо.
         `;
 
         const res = await model.generateContent([prompt]);
@@ -522,20 +529,19 @@ async function generateStoryParts(ctx, text) {
             return;
         }
 
-        // розділити на 3 частини рівномірно
-        const partSize = Math.ceil(fullText.length / 3);
+        const safeText = escapeMarkdown(fullText);
+        const partSize = Math.ceil(safeText.length / 3);
         const parts = [
-            fullText.slice(0, partSize),
-            fullText.slice(partSize, partSize * 2),
-            fullText.slice(partSize * 2)
+            safeText.slice(0, partSize),
+            safeText.slice(partSize, partSize * 2),
+            safeText.slice(partSize * 2)
         ].map(p => p.trim());
 
         await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
 
-        // Надсилання 3-х постів
-        await ctx.reply(`**🤯 Історія: ${text} – Частина 1/3**\n\n${parts[0]}\n\n*_Продовження буде завтра!_*`, { parse_mode: 'Markdown' });
-        await ctx.reply(`**💰 Історія: ${text} – Частина 2/3**\n\n${parts[1]}\n\n*_Кінець уже близько..._*`, { parse_mode: 'Markdown' });
-        await ctx.reply(`**✅ Історія: ${text} – Частина 3/3 (Розв'язка)**\n\n${parts[2]}\n\n*_Кінець історії. Поділися думками!*_`, { parse_mode: 'Markdown' });
+        await ctx.reply(`*🤯 Історія:* ${escapeMarkdown(text)} *– Частина 1/3*\n\n${parts[0]}\n\n_Продовження буде завтра!_`, { parse_mode: 'MarkdownV2' });
+        await ctx.reply(`*💰 Історія:* ${escapeMarkdown(text)} *– Частина 2/3*\n\n${parts[1]}\n\n_Кінець уже близько..._`, { parse_mode: 'MarkdownV2' });
+        await ctx.reply(`*✅ Історія:* ${escapeMarkdown(text)} *– Частина 3/3 (Розв'язка)*\n\n${parts[2]}\n\n_Кінець історії. Поділися думками!_`, { parse_mode: 'MarkdownV2' });
 
         saveUsedTopic(text);
         await ctx.reply('✅ Усі 3 частини історії згенеровано!', getMainMenuKeyboard());
