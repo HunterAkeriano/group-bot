@@ -8,7 +8,7 @@ dotenv.config();
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.0-flash',
     generationConfig: {
         temperature: 0.95,
         maxOutputTokens: 2048,
@@ -163,6 +163,30 @@ async function generateBlogTopics(ctx, numTopics = 5) {
     await ctx.reply('Обери тему для блогу:', getTopicsKeyboard(newTopics, '🔄 Перегенерувати теми'));
 }
 
+async function generateBlogPost(ctx, text) {
+    const chatId = ctx.chat.id;
+
+    await ctx.reply(`✨ **Ідея для блогу:**\n\n${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply('✍️ Генерую повний блог-пост...');
+
+    const postPrompt = `Створи великий телеграм-пост українською (1500 символів) у стилі сучасного IT-блогу. Тема: "${text}"`;
+    const postRes = await model.generateContent([postPrompt]);
+    const postText = getText(postRes);
+
+    if (!postText) {
+        await ctx.reply('⚠️ Не вдалося створити пост. Спробуй ще раз пізніше 😔', getMainMenuKeyboard());
+        return;
+    }
+
+    const styledPost = cleanPostText(postText);
+
+    saveUsedTopic(text);
+    userBlogTopics.delete(chatId);
+    userCurrentMode.delete(chatId);
+
+    await ctx.reply(styledPost, getMainMenuKeyboard());
+}
+
 bot.hears('🧠 Сгенерувати блог', ctx => {
     protectedGeneration(ctx, 'blog_topics', generateBlogTopics);
 });
@@ -213,6 +237,30 @@ async function generateTaskTopics(ctx, numTopics = 5) {
     userCurrentMode.set(chatId, 'task');
 
     await ctx.reply('Обери задачу:', getTopicsKeyboard(newTopics, '🔄 Перегенерувати задачі'));
+}
+
+async function generateTaskPost(ctx, text) {
+    const chatId = ctx.chat.id;
+
+    await ctx.reply(`🎯 **Вибрана задача:** ${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply('🔧 Генерую деталі задачі...');
+
+    const taskPrompt = `Створи коротку практичну задачу з JavaScript українською. Тема: "${text}". Формат: 🧩 Задача: опис, 📦 Приклад: код JS, 🔍 Уточнення: умови. До 1000 символів.`;
+    const taskRes = await model.generateContent([taskPrompt]);
+    const taskText = getText(taskRes);
+
+    if (!taskText) {
+        await ctx.reply('⚠️ Не вдалося створити задачу. Спробуй ще раз пізніше 😔', getMainMenuKeyboard());
+        return;
+    }
+
+    const styledTask = cleanPostText(taskText);
+
+    saveUsedTopic(text);
+    userTaskTopics.delete(chatId);
+    userCurrentMode.delete(chatId);
+
+    await ctx.reply(styledTask, getMainMenuKeyboard());
 }
 
 bot.hears('🧮 Зробити задачу', ctx => {
@@ -273,6 +321,55 @@ async function generateQuizTopics(ctx, numTopics = 5) {
     await ctx.reply('Обери тему вікторини:', getTopicsKeyboard(newTopics, '🔄 Перегенерувати вікторини'));
 }
 
+async function generateQuizPost(ctx, text) {
+    const chatId = ctx.chat.id;
+
+    await ctx.reply(`🎯 **Вибрана тема вікторини:** ${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply('📝 Генерую питання та пост...');
+
+    const prompt = `Створи одне складне запитання з фронтенду українською на тему "${text}" (до 300 символів). Формат: QUESTION: текст\nOPTIONS:\n1) варіант\n2) варіант\n3) варіант\n4) варіант\nCORRECT: номер\nEXPLANATION: пояснення`;
+    const res = await model.generateContent([prompt]);
+    const responseText = getText(res);
+
+    const qMatch = responseText.match(/^QUESTION:\s*(.+?)\n/ms);
+    if (!qMatch) {
+        await ctx.reply('⚠️ Не вдалося створити нове запитання для цієї теми 😔', getMainMenuKeyboard());
+        return;
+    }
+
+    const question = qMatch[1]?.trim();
+    const optionsBlock = responseText.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms)?.[1] || '';
+    const options = optionsBlock.split(/\d\)\s*/).filter(Boolean).map(o => o.trim().slice(0, 70)).filter(o => o.length > 0);
+    const correct = Number(responseText.match(/CORRECT:\s*(\d)/)?.[1]) - 1;
+    const explanation = responseText.match(/EXPLANATION:\s*(.+)/is)?.[1]?.trim()?.slice(0, 200) || 'Відповідь пояснюється у наступному пості!';
+
+    if (!question || options.length < 4 || correct < 0 || correct >= options.length) {
+        await ctx.reply('⚠️ Не вдалося створити нове запитання для цієї теми 😔', getMainMenuKeyboard());
+        return;
+    }
+
+    await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
+        type: 'quiz',
+        correct_option_id: correct,
+        explanation: explanation,
+        is_anonymous: true
+    });
+
+    const postPrompt = `Створи український телеграм-пост (700–1200 символів) для теми "${question}" у стилі короткого навчального поста.`;
+    const postRes = await model.generateContent([postPrompt]);
+    const postText = getText(postRes);
+
+    saveUsedTopic(text);
+    userQuizTopics.delete(chatId);
+    userCurrentMode.delete(chatId);
+
+    if (postText) {
+        await ctx.telegram.sendMessage(ctx.chat.id, cleanPostText(postText), getMainMenuKeyboard());
+    } else {
+        await ctx.reply('✅ Вікторина створена!', getMainMenuKeyboard());
+    }
+}
+
 bot.hears('🧩 Сгенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
 });
@@ -300,27 +397,7 @@ bot.on('text', async ctx => {
     if (mode === 'blog') {
         const topics = userBlogTopics.get(chatId);
         if (topics && topics.includes(text)) {
-            userCurrentMode.delete(chatId);
-
-            protectedGeneration(ctx, 'blog_post', async (ctx) => {
-                await ctx.reply(`✨ **Ідея для блогу:**\n\n${text}`, { parse_mode: 'Markdown' });
-                await ctx.reply('✍️ Генерую повний блог-пост...');
-
-                saveUsedTopic(text);
-                userBlogTopics.delete(chatId);
-
-                const postPrompt = `Створи великий телеграм-пост українською (1500 символів) у стилі сучасного IT-блогу. Тема: "${text}"`;
-                const postRes = await model.generateContent([postPrompt]);
-                const postText = getText(postRes);
-
-                if (!postText) {
-                    await ctx.reply('⚠️ Не вдалося створити пост. Спробуй ще раз пізніше 😔', getMainMenuKeyboard());
-                    return;
-                }
-
-                const styledPost = cleanPostText(postText);
-                await ctx.reply(styledPost, getMainMenuKeyboard());
-            });
+            protectedGeneration(ctx, 'blog_post', (ctx) => generateBlogPost(ctx, text));
             return;
         }
     }
@@ -328,27 +405,7 @@ bot.on('text', async ctx => {
     if (mode === 'task') {
         const topics = userTaskTopics.get(chatId);
         if (topics && topics.includes(text)) {
-            userCurrentMode.delete(chatId);
-
-            protectedGeneration(ctx, 'task_post', async (ctx) => {
-                await ctx.reply(`🎯 **Вибрана задача:** ${text}`, { parse_mode: 'Markdown' });
-                await ctx.reply('🔧 Генерую деталі задачі...');
-
-                saveUsedTopic(text);
-                userTaskTopics.delete(chatId);
-
-                const taskPrompt = `Створи коротку практичну задачу з JavaScript українською. Тема: "${text}". Формат: 🧩 Задача: опис, 📦 Приклад: код JS, 🔍 Уточнення: умови. До 1000 символів.`;
-                const taskRes = await model.generateContent([taskPrompt]);
-                const taskText = getText(taskRes);
-
-                if (!taskText) {
-                    await ctx.reply('⚠️ Не вдалося створити задачу. Спробуй ще раз пізніше 😔', getMainMenuKeyboard());
-                    return;
-                }
-
-                const styledTask = cleanPostText(taskText);
-                await ctx.reply(styledTask, getMainMenuKeyboard());
-            });
+            protectedGeneration(ctx, 'task_post', (ctx) => generateTaskPost(ctx, text));
             return;
         }
     }
@@ -356,53 +413,8 @@ bot.on('text', async ctx => {
     if (mode === 'quiz') {
         const topics = userQuizTopics.get(chatId);
         if (topics && topics.includes(text)) {
-            userCurrentMode.delete(chatId);
-
-            protectedGeneration(ctx, 'quiz_post', async (ctx) => {
-                await ctx.reply(`🎯 **Вибрана тема вікторини:** ${text}`, { parse_mode: 'Markdown' });
-                await ctx.reply('📝 Генерую питання та пост...');
-
-                saveUsedTopic(text);
-                userQuizTopics.delete(chatId);
-
-                const prompt = `Створи одне складне запитання з фронтенду українською на тему "${text}" (до 300 символів). Формат: QUESTION: текст\nOPTIONS:\n1) варіант\n2) варіант\n3) варіант\n4) варіант\nCORRECT: номер\nEXPLANATION: пояснення`;
-                const res = await model.generateContent([prompt]);
-                const responseText = getText(res);
-
-                const qMatch = responseText.match(/^QUESTION:\s*(.+?)\n/ms);
-                if (!qMatch) {
-                    await ctx.reply('⚠️ Не вдалося створити нове запитання для цієї теми 😔', getMainMenuKeyboard());
-                    return;
-                }
-
-                const question = qMatch[1]?.trim();
-                const optionsBlock = responseText.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms)?.[1] || '';
-                const options = optionsBlock.split(/\d\)\s*/).filter(Boolean).map(o => o.trim().slice(0, 70)).filter(o => o.length > 0);
-                const correct = Number(responseText.match(/CORRECT:\s*(\d)/)?.[1]) - 1;
-                const explanation = responseText.match(/EXPLANATION:\s*(.+)/is)?.[1]?.trim()?.slice(0, 200) || 'Відповідь пояснюється у наступному пості!';
-
-                if (!question || options.length < 4 || correct < 0 || correct >= options.length) {
-                    await ctx.reply('⚠️ Не вдалося створити нове запитання для цієї теми 😔', getMainMenuKeyboard());
-                    return;
-                }
-
-                await ctx.telegram.sendPoll(ctx.chat.id, question, options, {
-                    type: 'quiz',
-                    correct_option_id: correct,
-                    explanation: explanation,
-                    is_anonymous: true
-                });
-
-                const postPrompt = `Створи український телеграм-пост (700–1200 символів) для теми "${question}" у стилі короткого навчального поста.`;
-                const postRes = await model.generateContent([postPrompt]);
-                const postText = getText(postRes);
-
-                if (postText) {
-                    await ctx.telegram.sendMessage(ctx.chat.id, cleanPostText(postText), getMainMenuKeyboard());
-                } else {
-                    await ctx.reply('✅ Вікторина створена!', getMainMenuKeyboard());
-                }
-            });
+            protectedGeneration(ctx, 'quiz_post', (ctx) => generateQuizPost(ctx, text));
+            return;
         }
     }
 });
