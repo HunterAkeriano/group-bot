@@ -67,6 +67,7 @@ const userBlogTopics = new Map();
 const userTaskTopics = new Map();
 const userQuizTopics = new Map();
 const userQuoteTopics = new Map();
+const userStoryTopics = new Map();
 const userCurrentMode = new Map();
 
 function protectedGeneration(ctx, type, generator) {
@@ -99,7 +100,8 @@ function cleanPostText(text) {
 function getMainMenuKeyboard() {
     return Markup.keyboard([
         ['🧠 Згенерувати блог', '🧩 Згенерувати опитування'],
-        ['🎭 Згенерувати цитату', '🧮 Зробити задачу']
+        ['🎭 Згенерувати цитату', '🧮 Зробити задачу'],
+        ['📖 Згенерувати історію']
     ]).resize();
 }
 
@@ -216,6 +218,14 @@ bot.hears('🔄 Перегенерувати теми', ctx => {
 
     if (mode === 'blog') {
         protectedGeneration(ctx, 'blog_topics', generateBlogTopics);
+    } else if (mode === 'task') {
+        protectedGeneration(ctx, 'task_topics', generateTaskTopics);
+    } else if (mode === 'quiz') {
+        protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
+    } else if (mode === 'quote') {
+        protectedGeneration(ctx, 'quote_topics', generateQuoteTopics);
+    } else if (mode === 'story') {
+        protectedGeneration(ctx, 'story_topics', generateStoryTopics);
     }
 });
 
@@ -285,16 +295,6 @@ async function generateTaskPost(ctx, text) {
 bot.hears('🧮 Зробити задачу', ctx => {
     if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'task_topics', generateTaskTopics);
-});
-
-bot.hears('🔄 Перегенерувати задачі', ctx => {
-    if (!checkAccess(ctx)) return;
-    const chatId = ctx.chat.id;
-    const mode = userCurrentMode.get(chatId);
-
-    if (mode === 'task') {
-        protectedGeneration(ctx, 'task_topics', generateTaskTopics);
-    }
 });
 
 async function generateQuizTopics(ctx, numTopics = 5) {
@@ -396,16 +396,6 @@ bot.hears('🧩 Згенерувати опитування', ctx => {
     protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
 });
 
-bot.hears('🔄 Перегенерувати вікторини', ctx => {
-    if (!checkAccess(ctx)) return;
-    const chatId = ctx.chat.id;
-    const mode = userCurrentMode.get(chatId);
-
-    if (mode === 'quiz') {
-        protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
-    }
-});
-
 async function generateQuoteTopics(ctx, numTopics = 10) {
     const chatId = ctx.chat.id;
     await ctx.reply(`😎 Генерую ${numTopics} цитат розробника...`);
@@ -465,15 +455,106 @@ bot.hears('🎭 Згенерувати цитату', ctx => {
     protectedGeneration(ctx, 'quote_topics', generateQuoteTopics);
 });
 
-bot.hears('🔄 Перегенерувати цитати', ctx => {
-    if (!checkAccess(ctx)) return;
+async function generateStoryTopics(ctx, numTopics = 5) {
     const chatId = ctx.chat.id;
-    const mode = userCurrentMode.get(chatId);
+    await ctx.reply(`📖 Генерую ${numTopics} клікбейтних ідей для історій...`);
 
-    if (mode === 'quote') {
-        protectedGeneration(ctx, 'quote_topics', generateQuoteTopics);
+    const ideaPrompt = `
+Придумай ${numTopics} коротких, дуже клікбейтних, шокуючих ідей українською для телеграм-історій про IT, програмування, гроші, невдачі, кар'єру, фріланс.
+Кожна ідея:
+- до 70 символів
+- почни з емодзі (🤯, 💰, 🚨, 😱, 😈)
+- без лапок
+- нумерована з 1 до ${numTopics}
+Формат:
+1) емодзі + назва
+2) емодзі + назва
+...
+`;
+
+    const result = await model.generateContent([ideaPrompt]);
+    const text = getText(result);
+
+    const lines = text.split('\n').filter(l => l.trim());
+    const newTopics = [];
+
+    for (const line of lines) {
+        const match = line.match(/^\d+\)\s*(.+)$/);
+        if (match && newTopics.length < numTopics) {
+            const idea = match[1].trim();
+            if (!isDuplicateIdea(idea)) {
+                newTopics.push(idea);
+            }
+        }
     }
+
+    if (newTopics.length === 0) {
+        await ctx.reply('⚠️ Не вдалося знайти нових тем для історій 😅', getMainMenuKeyboard());
+        return;
+    }
+
+    userStoryTopics.set(chatId, newTopics);
+    userCurrentMode.set(chatId, 'story');
+
+    await ctx.reply('Обери тему для клікбейт історії:', getTopicsKeyboard(newTopics, '🔄 Перегенерувати теми'));
+}
+
+async function generateStoryParts(ctx, text) {
+    const chatId = ctx.chat.id;
+
+    await ctx.reply(`🚨 **Вибрана клікбейт тема:**\n\n${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply('📚 Генерую 3 частини історії...');
+
+    const storyPrompt = `
+Створи дуже захоплюючу, клікбейтну історію українською мовою на тему: "${text}".
+Історія має бути розділена на 3 частини:
+1. ПОЧАТОК (близько 600 символів): Захоплююче введення, що створює інтригу. Закінчується на піку події або великому питанні.
+2. СЕРЕДИНА (близько 600 символів): Розвиток сюжету, який лише посилює проблему або додає нові шокуючі деталі. Закінчується на КРАЙНЬОМУ кліфгенгері, змушуючи чекати.
+3. РОЗВ'ЯЗКА (близько 800 символів): Несподівана, але логічна розв'язка та висновок (мораль).
+Використовуй тільки наступний формат:
+ЧАСТИНА 1: текст
+---
+ЧАСТИНА 2: текст
+---
+ЧАСТИНА 3: текст
+`;
+    const storyRes = await model.generateContent([storyPrompt]);
+    const storyText = getText(storyRes);
+
+    if (!storyText) {
+        await ctx.reply('⚠️ Не вдалося створити історію. Спробуй ще раз пізніше 😔', getMainMenuKeyboard());
+        return;
+    }
+
+    const parts = storyText.split('\n---\n').map(p => cleanPostText(p.trim()));
+
+    if (parts.length === 3) {
+        const part1 = parts[0].replace(/^ЧАСТИНА 1:\s*/, '').trim();
+        const part2 = parts[1].replace(/^ЧАСТИНА 2:\s*/, '').trim();
+        const part3 = parts[2].replace(/^ЧАСТИНА 3:\s*/, '').trim();
+
+        await ctx.reply(`**🤯 Історія: ${text} – Частина 1**\n\n${part1}\n\n*_Продовження завтра..._`, { parse_mode: 'Markdown' });
+
+        await ctx.reply(`**💰 Історія: ${text} – Частина 2**\n\n${part2}\n\n*_Не пропусти розв'язку!_`, { parse_mode: 'Markdown' });
+
+        await ctx.reply(`**✅ Історія: ${text} – Розв'язка**\n\n${part3}\n\n*_Кінець історії_`, { parse_mode: 'Markdown' });
+
+        saveUsedTopic(text);
+        userStoryTopics.delete(chatId);
+        userCurrentMode.delete(chatId);
+
+        await ctx.reply('✅ Усі 3 частини історії згенеровано!', getMainMenuKeyboard());
+
+    } else {
+        await ctx.reply('⚠️ Не вдалося правильно розділити історію на 3 частини 😔', getMainMenuKeyboard());
+    }
+}
+
+bot.hears('📖 Згенерувати історію', ctx => {
+    if (!checkAccess(ctx)) return;
+    protectedGeneration(ctx, 'story_topics', generateStoryTopics);
 });
+
 
 bot.on('text', async ctx => {
     if (!checkAccess(ctx)) return;
@@ -482,7 +563,7 @@ bot.on('text', async ctx => {
     const text = ctx.message.text;
     const mode = userCurrentMode.get(chatId);
 
-    const MAIN_MENU_BUTTONS = ['🧠 Згенерувати блог', '🧩 Згенерувати опитування', '🎭 Згенерувати цитату', '🧮 Зробити задачу'];
+    const MAIN_MENU_BUTTONS = ['🧠 Згенерувати блог', '🧩 Згенерувати опитування', '🎭 Згенерувати цитату', '🧮 Зробити задачу', '📖 Згенерувати історію'];
     const TOPIC_REGENERATE_BUTTONS = ['🔄 Перегенерувати теми', '🔄 Перегенерувати задачі', '🔄 Перегенерувати вікторини', '🔄 Перегенерувати цитати'];
 
     if (MAIN_MENU_BUTTONS.includes(text) || TOPIC_REGENERATE_BUTTONS.includes(text)) {
@@ -523,6 +604,14 @@ bot.on('text', async ctx => {
         const topics = userQuoteTopics.get(chatId);
         if (topics && topics.includes(text)) {
             protectedGeneration(ctx, 'quote_post', (ctx) => generateQuotePost(ctx, text));
+            return;
+        }
+    }
+
+    if (mode === 'story') {
+        const topics = userStoryTopics.get(chatId);
+        if (topics && topics.includes(text)) {
+            protectedGeneration(ctx, 'story_parts', (ctx) => generateStoryParts(ctx, text));
         }
     }
 });
