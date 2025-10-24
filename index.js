@@ -203,7 +203,7 @@ async function generateBlogPost(ctx, text) {
     await ctx.reply(styledPost, getMainMenuKeyboard());
 }
 
-bot.hears('🧠 Сгенерувати блог', ctx => {
+bot.hears('🧠 Згенерувати блог', ctx => {
     if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'blog_topics', generateBlogTopics);
 });
@@ -390,7 +390,7 @@ async function generateQuizPost(ctx, text) {
     }
 }
 
-bot.hears('🧩 Сгенерувати опитування', ctx => {
+bot.hears('🧩 Згенерувати опитування', ctx => {
     if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'quiz_topics', generateQuizTopics);
 });
@@ -438,12 +438,11 @@ bot.on('text', async ctx => {
         const topics = userQuizTopics.get(chatId);
         if (topics && topics.includes(text)) {
             protectedGeneration(ctx, 'quiz_post', (ctx) => generateQuizPost(ctx, text));
-            return;
         }
     }
 });
 
-bot.hears('🎭 Сгенерувати цитату', ctx => {
+bot.hears('🎭 Згенерувати цитату', ctx => {
     if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'quote', async (ctx) => {
         await ctx.reply('😎 Генерую настрій розробника...');
