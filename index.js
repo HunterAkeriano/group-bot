@@ -95,13 +95,10 @@ function cleanPostText(text) {
     return text.replace(/[*_`<>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-const MAIN_MENU_BUTTONS = ['🧠 Сгенерувати блог', '🧩 Сгенерувати опитування', '🎭 Сгенерувати цитату', '🧮 Зробити задачу'];
-
-
 function getMainMenuKeyboard() {
     return Markup.keyboard([
-        [MAIN_MENU_BUTTONS[0], MAIN_MENU_BUTTONS[1]],
-        [MAIN_MENU_BUTTONS[2], MAIN_MENU_BUTTONS[3]]
+        ['🧠 Згенерувати блог', '🧩 Згенерувати опитування'],
+        ['🎭 Згенерувати цитату', '🧮 Зробити задачу']
     ]).resize();
 }
 
@@ -364,7 +361,7 @@ async function generateQuizPost(ctx, text) {
     const optionsBlock = responseText.match(/OPTIONS:([\s\S]*?)\nCORRECT:/ms)?.[1] || '';
     const options = optionsBlock.split(/\d\)\s*/).filter(Boolean).map(o => o.trim().slice(0, 70)).filter(o => o.length > 0);
     const correct = Number(responseText.match(/CORRECT:\s*(\d)/)?.[1]) - 1;
-    const explanation = responseText.match(/EXPLANATION:\s*(.+)/is)?.[1]?.trim()?.slice(0, 200) || 'Відповідь пояснюється у наступному посте!';
+    const explanation = responseText.match(/EXPLANATION:\s*(.+)/is)?.[1]?.trim()?.slice(0, 200) || 'Відповідь пояснюється у наступному пості!';
 
     if (!question || options.length < 4 || correct < 0 || correct >= options.length) {
         await ctx.reply('⚠️ Не вдалося створити нове запитання для цієї теми 😔', getMainMenuKeyboard());
@@ -414,13 +411,6 @@ bot.on('text', async ctx => {
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
     const mode = userCurrentMode.get(chatId);
-
-    const MAIN_MENU_BUTTONS = ['🧠 Сгенерувати блог', '🧩 Сгенерувати опитування', '🎭 Сгенерувати цитату', '🧮 Зробити задачу'];
-    const TOPIC_REGENERATE_BUTTONS = ['🔄 Перегенерувати теми', '🔄 Перегенерувати задачі', '🔄 Перегенерувати вікторини'];
-
-    if (MAIN_MENU_BUTTONS.includes(text) || TOPIC_REGENERATE_BUTTONS.includes(text)) {
-        return;
-    }
 
     if (text === '⬅️ Назад в меню') {
         userCurrentMode.delete(chatId);
