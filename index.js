@@ -499,53 +499,54 @@ async function generateStoryTopics(ctx, numTopics = 5) {
     await ctx.reply('Обери тему для клікбейт історії:', getTopicsKeyboard(newTopics, '🔄 Перегенерувати теми'));
 }
 
-function escapeMarkdown(text) {
-    // Экранируем спецсимволы Telegram Markdown
-    return text
-        .replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
-        .replace(/\\/g, '\\\\'); // двойное экранирование слэшей
-}
-
 async function generateStoryParts(ctx, text) {
     const chatId = ctx.chat.id;
-    await ctx.reply(`🚨 **Вибрана клікбейт тема:**\n\n${escapeMarkdown(text)}`, { parse_mode: 'MarkdownV2' });
+    await ctx.reply(`🚨 Вибрана клікбейт тема:\n\n${text}`);
 
     const waitMessage = await ctx.reply('📚 Генерую повну історію...');
 
     try {
         const prompt = `
 Створи українську клікбейт-історію приблизно на 3300 символів на тему "${text}".
-Історія повинна бути у стилі телеграм-поста, від першої особи (Я),
-з інтригою, драмою, фінальною розв'язкою і моральним висновком.
-Без заголовків "Частина 1" тощо.
+Розкажи її від першої особи (Я) у стилі телеграм-блогу.
+Структура має бути: початок (інтрига), середина (проблема/драма), кінець (розв'язка, мораль).
+Не пиши "Частина 1" або подібне — просто звичайна історія.
         `;
 
         const res = await model.generateContent([prompt]);
-        const fullText = cleanPostText(getText(res));
+        let fullText = getText(res) || '';
 
-        if (!fullText || fullText.length < 1000) {
+        // Очистка и нормализация
+        fullText = fullText
+            .replace(/[*_`~>#+=|{}[\]]/g, '')
+            .replace(/<\/?[^>]+(>|$)/g, '')
+            .replace(/\s{2,}/g, ' ')
+            .replace(/&[^;\s]+;/g, '')
+            .trim();
+
+        if (fullText.length < 500) {
             await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
             await ctx.reply('⚠️ Не вдалося створити історію. Спробуй ще раз 😔', getMainMenuKeyboard());
             return;
         }
 
-        const safeText = escapeMarkdown(fullText);
-        const partSize = Math.ceil(safeText.length / 3);
+        // Разделение на 3 части по предложениям
+        const sentences = fullText.split(/(?<=[.!?])\s+/);
+        const targetLen = Math.ceil(sentences.length / 3);
         const parts = [
-            safeText.slice(0, partSize),
-            safeText.slice(partSize, partSize * 2),
-            safeText.slice(partSize * 2)
+            sentences.slice(0, targetLen).join(' '),
+            sentences.slice(targetLen, targetLen * 2).join(' '),
+            sentences.slice(targetLen * 2).join(' ')
         ].map(p => p.trim());
 
         await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
 
-        await ctx.reply(`*🤯 Історія:* ${escapeMarkdown(text)} *– Частина 1/3*\n\n${parts[0]}\n\n_Продовження буде завтра!_`, { parse_mode: 'MarkdownV2' });
-        await ctx.reply(`*💰 Історія:* ${escapeMarkdown(text)} *– Частина 2/3*\n\n${parts[1]}\n\n_Кінець уже близько..._`, { parse_mode: 'MarkdownV2' });
-        await ctx.reply(`*✅ Історія:* ${escapeMarkdown(text)} *– Частина 3/3 (Розв'язка)*\n\n${parts[2]}\n\n_Кінець історії. Поділися думками!_`, { parse_mode: 'MarkdownV2' });
+        await ctx.reply(`🤯 Історія: ${text} – Частина 1/3\n\n${parts[0]}\n\nПродовження буде завтра!`);
+        await ctx.reply(`💰 Історія: ${text} – Частина 2/3\n\n${parts[1]}\n\nКінець уже близько...`);
+        await ctx.reply(`✅ Історія: ${text} – Частина 3/3 (Розв'язка)\n\n${parts[2]}\n\nКінець історії. Поділися думками!`);
 
         saveUsedTopic(text);
         await ctx.reply('✅ Усі 3 частини історії згенеровано!', getMainMenuKeyboard());
-
     } catch (error) {
         console.error('❌ Story generation error:', error);
         await ctx.telegram.deleteMessage(chatId, waitMessage.message_id).catch(() => {});
@@ -555,6 +556,7 @@ async function generateStoryParts(ctx, text) {
         userCurrentMode.delete(chatId);
     }
 }
+
 
 
 bot.hears('📖 Згенерувати історію', ctx => {
