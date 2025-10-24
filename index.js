@@ -516,7 +516,6 @@ async function generateStoryParts(ctx, text) {
         const res = await model.generateContent([prompt]);
         let fullText = getText(res) || '';
 
-        // Очистка и нормализация
         fullText = fullText
             .replace(/[*_`~>#+=|{}[\]]/g, '')
             .replace(/<\/?[^>]+(>|$)/g, '')
@@ -530,7 +529,6 @@ async function generateStoryParts(ctx, text) {
             return;
         }
 
-        // Разделение на 3 части по предложениям
         const sentences = fullText.split(/(?<=[.!?])\s+/);
         const targetLen = Math.ceil(sentences.length / 3);
         const parts = [
@@ -556,7 +554,6 @@ async function generateStoryParts(ctx, text) {
         userCurrentMode.delete(chatId);
     }
 }
-
 
 
 bot.hears('📖 Згенерувати історію', ctx => {
