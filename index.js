@@ -442,7 +442,7 @@ bot.on('text', async ctx => {
     }
 });
 
-bot.hears('🎭 Згенерувати цитату', ctx => {
+bot.hears(/🎭\s*Згенерувати цитату/i, ctx => {
     if (!checkAccess(ctx)) return;
     protectedGeneration(ctx, 'quote', async (ctx) => {
         await ctx.reply('😎 Генерую настрій розробника...');
